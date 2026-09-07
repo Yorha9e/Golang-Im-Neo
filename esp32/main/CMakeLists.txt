@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "im_proto.c"
+        "im_wifi.c"
+        "im_ws_client.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        nanopb
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_client
+        esp_websocket_client
+)
