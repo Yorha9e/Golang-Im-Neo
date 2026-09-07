@@ -10,6 +10,7 @@ import (
 type User struct {
 	ID           string         `gorm:"primaryKey;type:varchar(36)"`
 	Username     string         `gorm:"type:varchar(64);not null;uniqueIndex:uq_users_username,where:deleted_at IS NULL"`
+	Nickname     string         `gorm:"type:varchar(64);default:''"`
 	PasswordHash string         `gorm:"type:varchar(128);not null"`
 	AvatarURL    string         `gorm:"type:varchar(255);default:''"`
 	Signature    string         `gorm:"type:varchar(255);default:''"`
@@ -104,7 +105,8 @@ type UserPost struct {
 	Content      string         `gorm:"type:text"`
 	MediaURL     string         `gorm:"type:varchar(512);default:''"`
 	BilibiliBVID string         `gorm:"type:varchar(32);default:''"`
-	BilibiliMeta string         `gorm:"type:text;default:''"`
+	BilibiliMeta    string         `gorm:"type:text;default:''"`
+	LinkPreviewJSON string         `gorm:"column:link_preview_json;type:text;default:''"`
 	CreatedAt    time.Time      `gorm:"not null;index:idx_posts_user,priority:2"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
