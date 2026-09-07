@@ -108,3 +108,32 @@ type UserPost struct {
 	CreatedAt    time.Time      `gorm:"not null;index:idx_posts_user,priority:2"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 }
+
+// Group — groups table (stage 4, M1)
+type Group struct {
+	ID           string         `gorm:"primaryKey;type:varchar(36)"`
+	Name         string         `gorm:"type:varchar(64);not null"`
+	AvatarURL    string         `gorm:"type:varchar(255);default:''"`
+	Announcement string         `gorm:"type:varchar(512);default:''"`
+	OwnerID      string         `gorm:"type:varchar(36);not null;index"`
+	MaxMembers   int            `gorm:"not null;default:500"`
+	Status       int8           `gorm:"type:tinyint;not null;default:1"` // 1=active, 0=dismissed
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
+}
+
+// GroupMember — group_members table (stage 4, M1)
+type GroupMember struct {
+	ID        uint           `gorm:"primaryKey;autoIncrement"`
+	GroupID   string         `gorm:"type:varchar(36);not null;uniqueIndex:uq_active_group_member,where:deleted_at IS NULL"`
+	UserID    string         `gorm:"type:varchar(36);not null;uniqueIndex:uq_active_group_member,where:deleted_at IS NULL;index:idx_group_member_user"`
+	Role      string         `gorm:"type:varchar(16);not null;default:'member'"` // owner|admin|member
+	Muted     bool           `gorm:"not null;default:false"`
+	MutedBy   string         `gorm:"type:varchar(36);default:''"`
+	MutedAt   int64          `gorm:"default:0"` // ms; 0 = never
+	JoinedVia string         `gorm:"type:varchar(16);not null;default:'invite'"` // invite|join|create
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
