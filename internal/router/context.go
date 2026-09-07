@@ -32,29 +32,21 @@ const (
 // PublicHallCovID is the canonical conversation id for public hall broadcast.
 const PublicHallCovID = "cov:public:hall"
 
-// WriteResult mirrors the pinned Contract A shape:
-//
-//	store.WriteResult struct { Seq int64; Timestamp int64; Duplicated bool; Err error }
-//
-// NOTE (cross-mission M1): M1's store.WriteResult is not on main yet, so this
-// package defines the identical shape locally to stay compilable and testable
-// in isolation (scope forbids touching internal/store). Field names and types
-// match the pin EXACTLY. Once M1 lands, replace this struct with
-// `type WriteResult = store.WriteResult` (one line) — zero other changes —
-// at which point M1's *store.BatchWriter satisfies Persister structurally.
-type WriteResult struct {
-	Seq        int64
-	Timestamp  int64
-	Duplicated bool
-	Err        error
-}
+// WriteResult is the per-message persistence outcome (Contract A).
+// It is a type ALIAS for M1's store.WriteResult (merged to main), so the
+// production *store.BatchWriter satisfies Persister structurally with zero
+// conversion. Keep using this short name inside the router package.
+type WriteResult = store.WriteResult
 
-// Persister is the outbound persistence port (Contract A, shape-pinned).
-// The production implementation is M1's *store.BatchWriter.EnqueueSync
-// (wired by the integrator once M1 lands, see WriteResult note above).
+// Persister is the outbound persistence port (Contract A, verbatim).
+// Satisfied structurally by M1's *store.BatchWriter (see assertion below).
 type Persister interface {
 	EnqueueSync(msg *store.Message) <-chan WriteResult
 }
+
+// Compile-time Contract A integration proof: the real batch writer is a
+// valid Persister (channel element types now identical via the alias).
+var _ Persister = (*store.BatchWriter)(nil)
 
 // Emitter is the outbound delivery port (Contract B, verbatim).
 // The production implementation is M3's *gateway.Hub (structural match).
