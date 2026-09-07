@@ -8,12 +8,13 @@ import (
 )
 
 // Config is the root configuration mapped from config.toml
-// SSOT: [server], [security], [database], [admin] blocks must exist.
+// SSOT: [server], [security], [database], [admin], [media] blocks must exist.
 type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	Security SecurityConfig `toml:"security"`
 	Database DatabaseConfig `toml:"database"`
 	Admin    AdminConfig    `toml:"admin"`
+	Media    MediaConfig    `toml:"media"`
 }
 
 type ServerConfig struct {
@@ -32,11 +33,11 @@ type SecurityConfig struct {
 }
 
 type DatabaseConfig struct {
-	Path                   string `toml:"path"`
-	MaxOpenConns           int    `toml:"max_open_conns"`
-	MaxIdleConns           int    `toml:"max_idle_conns"`
-	BusyTimeout            string `toml:"busy_timeout"`
-	WalCheckpointTruncate  bool   `toml:"wal_checkpoint_truncate"`
+	Path                  string `toml:"path"`
+	MaxOpenConns          int    `toml:"max_open_conns"`
+	MaxIdleConns          int    `toml:"max_idle_conns"`
+	BusyTimeout           string `toml:"busy_timeout"`
+	WalCheckpointTruncate bool   `toml:"wal_checkpoint_truncate"`
 }
 
 type AdminConfig struct {
@@ -44,6 +45,26 @@ type AdminConfig struct {
 	Password string `toml:"password"`
 	Email    string `toml:"email"`
 }
+
+// MediaConfig holds the [media] block (M2 resource & media layer).
+// Ext whitelists are comma-separated, dot-prefixed lists, e.g.
+// ".jpg,.jpeg,.png,.gif,.webp".
+type MediaConfig struct {
+	StorageDir        string `toml:"storage_dir"`
+	MaxAvatarBytes    int64  `toml:"max_avatar_bytes"`
+	MaxFileBytes      int64  `toml:"max_file_bytes"`
+	AllowedAvatarExts string `toml:"allowed_avatar_exts"`
+	AllowedFileExts   string `toml:"allowed_file_exts"`
+}
+
+// Sane defaults for [media] so an OLD config.toml without the block still loads.
+const (
+	DefaultMediaStorageDir         = "./data/media"
+	DefaultMaxAvatarBytes    int64 = 2 << 20 // 2097152 (2MB, strict avatar cap)
+	DefaultMaxFileBytes      int64 = 20 << 20
+	DefaultAllowedAvatarExts       = ".jpg,.jpeg,.png,.gif,.webp"
+	DefaultAllowedFileExts         = ".jpg,.jpeg,.png,.gif,.webp,.aac,.mp3,.wav,.mp4"
+)
 
 // Load reads and parses config.toml from the given path.
 func Load(path string) (*Config, error) {
@@ -73,6 +94,23 @@ func LoadDefault() (*Config, error) {
 }
 
 func (c *Config) Validate() error {
+	// Fill [media] sane defaults first so an OLD config.toml without the
+	// block still loads with strict avatar enforcement intact.
+	if c.Media.StorageDir == "" {
+		c.Media.StorageDir = DefaultMediaStorageDir
+	}
+	if c.Media.MaxAvatarBytes == 0 {
+		c.Media.MaxAvatarBytes = DefaultMaxAvatarBytes
+	}
+	if c.Media.MaxFileBytes == 0 {
+		c.Media.MaxFileBytes = DefaultMaxFileBytes
+	}
+	if c.Media.AllowedAvatarExts == "" {
+		c.Media.AllowedAvatarExts = DefaultAllowedAvatarExts
+	}
+	if c.Media.AllowedFileExts == "" {
+		c.Media.AllowedFileExts = DefaultAllowedFileExts
+	}
 	if c.Server.Port == 0 {
 		return fmt.Errorf("server.port must be non-zero")
 	}
