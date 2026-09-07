@@ -237,6 +237,35 @@ func (h *Hub) KickUser(userID, reason string) {
 	}
 }
 
+// KickSession closes and unregisters exactly ONE connection by sessionID.
+// Other sessions of the same user (e.g. an ESP32 hardware session) stay online.
+// Synchronous: Count drops before return. Returns true if found/kicked.
+func (h *Hub) KickSession(sessionID, reason string) bool {
+	h.logger.Info("gateway kick session", zap.String("session", sessionID), zap.String("reason", reason))
+	// Clients are keyed by sessionID, so probe each shard directly.
+	for i := 0; i < ShardCount; i++ {
+		h.buckets[i].Lock()
+		c, ok := h.buckets[i].clients[sessionID]
+		if !ok {
+			h.buckets[i].Unlock()
+			continue
+		}
+		delete(h.buckets[i].clients, sessionID)
+		// Safe close mirroring KickUser: cannot panic on double-kick and
+		// pairs with Client.Enqueue's recover.
+		func() {
+			defer func() { _ = recover() }()
+			close(c.Send)
+		}()
+		h.buckets[i].Unlock()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
+		return true
+	}
+	return false
+}
+
 // IsOnline checks if a user has any active session.
 func (h *Hub) IsOnline(userID string) bool {
 	for i := 0; i < ShardCount; i++ {

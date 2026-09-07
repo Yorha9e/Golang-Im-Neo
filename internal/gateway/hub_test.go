@@ -344,3 +344,48 @@ func tail(s string, n int) string {
 	}
 	return s[len(s)-n:]
 }
+
+func TestKickSession(t *testing.T) {
+	h := newTestHub()
+	a1 := newTestClient(h, "alice", "interactive", "s-a1")
+	a2 := newTestClient(h, "alice", "hardware", "s-a2")
+	b1 := newTestClient(h, "bob", "interactive", "s-b1")
+	h.Register(a1)
+	h.Register(a2)
+	h.Register(b1)
+	waitForCount(t, h, 3, 2*time.Second)
+
+	if !h.KickSession("s-a1", "test-kick") {
+		t.Fatalf("KickSession existing session should return true")
+	}
+	waitForCount(t, h, 2, 2*time.Second)
+	if !h.IsOnline("alice") {
+		t.Fatalf("alice should stay online via the remaining session")
+	}
+	if !h.IsOnline("bob") {
+		t.Fatalf("bob should be unaffected by alice's session kick")
+	}
+
+	// Only the surviving session receives afterwards.
+	msg := []byte("after-kick")
+	if !h.SendToUser("alice", msg) {
+		t.Fatalf("SendToUser should reach the surviving session")
+	}
+	if got := recvTimeout(t, a2.Send, time.Second); !bytes.Equal(got, msg) {
+		t.Fatalf("surviving session got %q, want %q", got, msg)
+	}
+	if m, ok := <-a1.Send; ok {
+		t.Fatalf("kicked session should be closed, received %q", m)
+	}
+
+	// Double kick and unknown session both report false.
+	if h.KickSession("s-a1", "again") {
+		t.Fatalf("double KickSession should return false")
+	}
+	if h.KickSession("s-unknown", "test") {
+		t.Fatalf("KickSession unknown session should return false")
+	}
+	if got := h.Count(); got != 2 {
+		t.Fatalf("Count = %d, want 2", got)
+	}
+}
