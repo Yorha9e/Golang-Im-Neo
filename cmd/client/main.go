@@ -1,5 +1,5 @@
-// Command imcli is the Stage-1+2 command-line verification client
-// (MISSIONS M5 + M4).
+// Command imcli is the Stage-1+2+4 command-line verification client
+// (MISSIONS M5 + M4, Stage-4 M3).
 //
 // Protobuf binary frames both ways (golang-im-neo-system/proto). Actions:
 //
@@ -13,6 +13,9 @@
 //	friend-apply/-respond/-list/-pending/-delete   friend endpoints (cached login)
 //	media-upload multipart file upload, print mid + access_url
 //	admin-ban/-kick/-broadcast  admin endpoints (needs admin login)
+//	group-create/-list/-info/-members/-invite/-join/-leave/-dismiss/-kick/
+//	-role/-mute/-unmute/-history/-chat   Stage-4 group endpoints + WS fan-out
+//	signal-send/-listen   Stage-4 WebRTC signaling bypass frames over WS
 package main
 
 import (
@@ -44,7 +47,7 @@ var (
 	fPass    = flag.String("pass", "", "password")
 	fDevice  = flag.String("device", "interactive", "device class (interactive|hardware)")
 	fDevName = flag.String("devname", "", "device name (defaults to <device>-cli)")
-	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast")
+	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast|group-create|group-list|group-info|group-members|group-invite|group-join|group-leave|group-dismiss|group-kick|group-role|group-mute|group-unmute|group-history|group-chat|signal-send|signal-listen")
 	fMsg     = flag.String("msg", "", "chat text (chat action) or broadcast content (admin-broadcast)")
 	fTo      = flag.String("to", "", "recipient user_id for PRIVATE_CHAT (chat action)")
 	fListen  = flag.Duration("listen", 5*time.Second, "keep-reading window after sends (chat action)")
@@ -56,6 +59,9 @@ var (
 	fMediaTyp = flag.String("mediatype", "avatar", "media type for media-upload (avatar|image|voice|video)")
 	fAccess   = flag.String("access", "public", "access level for media-upload (public|private)")
 	fSession  = flag.String("session", "", "session_id for admin-kick")
+	// Stage-4 flags.
+	fGroup = flag.String("group", "", "group id for group-* actions")
+	fLimit = flag.Int("limit", 50, "history page size for group-history")
 )
 
 const ackTimeout = 5 * time.Second
@@ -697,19 +703,346 @@ func actAdminBroadcast() {
 	fmt.Printf("broadcast ok content=%q\n", *fMsg)
 }
 
+// ---------- Stage-4 actions (group + signaling) ----------
+
+func groupPath(id, suffix string) string {
+	return "/api/v1/groups/" + url.PathEscape(id) + suffix
+}
+
+func needGroup() string {
+	if *fGroup == "" {
+		fatalf("this action needs -group <id>")
+	}
+	return *fGroup
+}
+
+func actGroupCreate() {
+	sess := ensureLogin()
+	if *fMsg == "" {
+		fatalf("group-create needs -msg <name>")
+	}
+	data, err := postJSON(sess.Server, "/api/v1/groups", map[string]string{"name": *fMsg}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-create: %v", err)
+	}
+	var out struct {
+		GroupID string `json:"group_id"`
+		Name    string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.GroupID == "" {
+		fatalf("group-create: bad response %s", short(data))
+	}
+	fmt.Printf("group created group_id=%s name=%q\n", out.GroupID, out.Name)
+}
+
+func actGroupList() {
+	sess := ensureLogin()
+	data, err := getJSON(sess.Server, "/api/v1/groups", sess.AccessToken)
+	if err != nil {
+		fatalf("group-list: %v", err)
+	}
+	var groups []struct {
+		GroupID     string `json:"group_id"`
+		Name        string `json:"name"`
+		OwnerID     string `json:"owner_id"`
+		MemberCount int64  `json:"member_count"`
+	}
+	if err := json.Unmarshal(data, &groups); err != nil {
+		fatalf("group-list: bad response %s", short(data))
+	}
+	fmt.Printf("%-36s %-24s %-36s members\n", "GROUP_ID", "NAME", "OWNER")
+	for _, g := range groups {
+		fmt.Printf("%-36s %-24s %-36s %d\n", g.GroupID, g.Name, g.OwnerID, g.MemberCount)
+	}
+}
+
+func actGroupInfo() {
+	sess := ensureLogin()
+	id := needGroup()
+	data, err := getJSON(sess.Server, groupPath(id, ""), sess.AccessToken)
+	if err != nil {
+		fatalf("group-info: %v", err)
+	}
+	var out struct {
+		GroupID     string `json:"group_id"`
+		Name        string `json:"name"`
+		OwnerID     string `json:"owner_id"`
+		MemberCount int64  `json:"member_count"`
+		MaxMembers  int    `json:"max_members"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		fatalf("group-info: bad response %s", short(data))
+	}
+	fmt.Printf("group_id=%s name=%q owner=%s members=%d/%d\n",
+		out.GroupID, out.Name, out.OwnerID, out.MemberCount, out.MaxMembers)
+}
+
+func actGroupMembers() {
+	sess := ensureLogin()
+	id := needGroup()
+	data, err := getJSON(sess.Server, groupPath(id, "/members"), sess.AccessToken)
+	if err != nil {
+		fatalf("group-members: %v", err)
+	}
+	var members []struct {
+		UserID   string `json:"user_id"`
+		Username string `json:"username"`
+		Role     string `json:"role"`
+		Muted    bool   `json:"muted"`
+	}
+	if err := json.Unmarshal(data, &members); err != nil {
+		fatalf("group-members: bad response %s", short(data))
+	}
+	fmt.Printf("%-36s %-20s %-8s muted\n", "USER_ID", "USERNAME", "ROLE")
+	for _, m := range members {
+		fmt.Printf("%-36s %-20s %-8s %v\n", m.UserID, m.Username, m.Role, m.Muted)
+	}
+}
+
+func actGroupInvite() {
+	sess := ensureLogin()
+	id := needGroup()
+	if *fTarget == "" {
+		fatalf("group-invite needs -target <uid1,uid2>")
+	}
+	uids := strings.Split(*fTarget, ",")
+	for i := range uids {
+		uids[i] = strings.TrimSpace(uids[i])
+	}
+	data, err := postJSON(sess.Server, groupPath(id, "/invite"), map[string]interface{}{"user_ids": uids}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-invite: %v", err)
+	}
+	fmt.Printf("invite ok %s\n", short(data))
+}
+
+func actGroupJoin() {
+	sess := ensureLogin()
+	id := needGroup()
+	data, err := postJSON(sess.Server, groupPath(id, "/join"), map[string]string{}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-join: %v", err)
+	}
+	fmt.Printf("join ok %s\n", short(data))
+}
+
+func actGroupLeave() {
+	sess := ensureLogin()
+	id := needGroup()
+	data, err := postJSON(sess.Server, groupPath(id, "/leave"), map[string]string{}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-leave: %v", err)
+	}
+	fmt.Printf("leave ok %s\n", short(data))
+}
+
+func actGroupDismiss() {
+	sess := ensureLogin()
+	id := needGroup()
+	data, err := postJSON(sess.Server, groupPath(id, "/dismiss"), map[string]string{}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-dismiss: %v", err)
+	}
+	fmt.Printf("dismiss ok %s\n", short(data))
+}
+
+func actGroupKick() {
+	sess := ensureLogin()
+	id := needGroup()
+	if *fTarget == "" {
+		fatalf("group-kick needs -target <uid>")
+	}
+	data, err := deleteJSON(sess.Server, groupPath(id, "/members/"+url.PathEscape(*fTarget)), sess.AccessToken)
+	if err != nil {
+		fatalf("group-kick: %v", err)
+	}
+	fmt.Printf("kick ok %s\n", short(data))
+}
+
+func actGroupRole() {
+	sess := ensureLogin()
+	id := needGroup()
+	if *fTarget == "" {
+		fatalf("group-role needs -target <uid> -action2 <admin|member|owner>")
+	}
+	if *fAction2 != "admin" && *fAction2 != "member" && *fAction2 != "owner" {
+		fatalf("group-role: -action2 must be admin|member|owner")
+	}
+	data, err := doJSON(http.MethodPatch, sess.Server, groupPath(id, "/members/"+url.PathEscape(*fTarget)+"/role"),
+		map[string]string{"role": *fAction2}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-role: %v", err)
+	}
+	fmt.Printf("role ok %s\n", short(data))
+}
+
+func actGroupMute(muted bool) {
+	sess := ensureLogin()
+	id := needGroup()
+	if *fTarget == "" {
+		what := "group-mute"
+		if !muted {
+			what = "group-unmute"
+		}
+		fatalf("%s needs -target <uid>", what)
+	}
+	data, err := doJSON(http.MethodPatch, sess.Server, groupPath(id, "/members/"+url.PathEscape(*fTarget)+"/mute"),
+		map[string]bool{"muted": muted}, sess.AccessToken)
+	if err != nil {
+		fatalf("group-mute: %v", err)
+	}
+	fmt.Printf("mute=%v ok %s\n", muted, short(data))
+}
+
+func actGroupHistory() {
+	sess := ensureLogin()
+	id := needGroup()
+	path := groupPath(id, "/history") + "?limit=" + url.QueryEscape(fmt.Sprint(*fLimit))
+	data, err := getJSON(sess.Server, path, sess.AccessToken)
+	if err != nil {
+		fatalf("group-history: %v", err)
+	}
+	var out struct {
+		Messages []struct {
+			Seq      int64  `json:"seq"`
+			FromUID  string `json:"from_uid"`
+			Content  string `json:"content"`
+			StanzaID string `json:"stanza_id"`
+		} `json:"messages"`
+		HasMore bool `json:"has_more"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		fatalf("group-history: bad response %s", short(data))
+	}
+	for _, m := range out.Messages {
+		fmt.Printf("seq=%d from=%s stanza=%s content=%q\n", m.Seq, m.FromUID, m.StanzaID, m.Content)
+	}
+	fmt.Printf("has_more=%v count=%d\n", out.HasMore, len(out.Messages))
+}
+
+func actGroupChat() {
+	sess := ensureLogin()
+	id := needGroup()
+	if *fMsg == "" {
+		fatalf("group-chat needs -group <id> -msg <text>")
+	}
+	w := dialWS(sess.Server, fetchTicket(sess))
+	defer w.close()
+
+	stanza := uuid.NewString()
+	out := &pb.WsMessage{Type: pb.MsgType_GROUP_CHAT, ToUid: id, Content: *fMsg, StanzaId: stanza}
+	fmt.Printf("-> GROUP_CHAT to=%s stanza=%s\n", id, stanza)
+	if err := w.send(out); err != nil {
+		fatalf("send: %v", err)
+	}
+	ack, err := awaitACK(w, stanza, ackTimeout)
+	if err != nil {
+		fatalf("no ACK: %v", err)
+	}
+	fmt.Printf("ACK seq=%d stanza=%s\n", ack.GetSeq(), ack.GetStanzaId())
+
+	if *fListen > 0 {
+		fmt.Printf("listening for %s ...\n", *fListen)
+		deadline := time.Now().Add(*fListen)
+		for {
+			rest := time.Until(deadline)
+			if rest <= 0 {
+				break
+			}
+			if _, err := w.next(rest); err != nil {
+				break // timeout ends the window; closed conn aborts early
+			}
+		}
+	}
+	fmt.Println("done")
+}
+
+func actSignalSend() {
+	sess := ensureLogin()
+	if *fTo == "" {
+		fatalf("signal-send needs -to <uid> -action2 <offer|answer|candidate> -msg <payload-text>")
+	}
+	var typ pb.MsgType
+	switch *fAction2 {
+	case "offer":
+		typ = pb.MsgType_SIGNALING_OFFER
+	case "answer":
+		typ = pb.MsgType_SIGNALING_ANSWER
+	case "candidate":
+		typ = pb.MsgType_SIGNALING_CANDIDATE
+	default:
+		fatalf("signal-send: -action2 must be offer|answer|candidate")
+	}
+	w := dialWS(sess.Server, fetchTicket(sess))
+	defer w.close()
+
+	stanza := uuid.NewString()
+	out := &pb.WsMessage{Type: typ, ToUid: *fTo, Payload: []byte(*fMsg), StanzaId: stanza}
+	fmt.Printf("-> %s to=%s stanza=%s payload=%q\n", typ, *fTo, stanza, *fMsg)
+	if err := w.send(out); err != nil {
+		fatalf("send: %v", err)
+	}
+	if *fListen > 0 {
+		fmt.Printf("listening for %s ...\n", *fListen)
+		deadline := time.Now().Add(*fListen)
+		for {
+			rest := time.Until(deadline)
+			if rest <= 0 {
+				break
+			}
+			if _, err := w.next(rest); err != nil {
+				break // timeout ends the window; closed conn aborts early
+			}
+		}
+	}
+	fmt.Println("done")
+}
+
+func actSignalListen() {
+	sess := ensureLogin()
+	w := dialWS(sess.Server, fetchTicket(sess))
+	defer w.close()
+
+	window := *fListen
+	if window <= 0 {
+		window = 30 * time.Second
+	}
+	fmt.Printf("listening for %s ...\n", window)
+	deadline := time.Now().Add(window)
+	for {
+		rest := time.Until(deadline)
+		if rest <= 0 {
+			break
+		}
+		if _, err := w.next(rest); err != nil {
+			break // timeout ends the window; closed conn aborts early
+		}
+	}
+	fmt.Println("done")
+}
+
 func usage() {
-	fmt.Fprintf(os.Stderr, `imcli — Stage-1+2 verification client
+	fmt.Fprintf(os.Stderr, `imcli — Stage-1+2+4 verification client
 Usage: imcli -action <name> [flags]
   actions: register | login | ticket | chat | dedup-test | e2e
            friend-apply | friend-respond | friend-list | friend-pending | friend-delete
            media-upload | admin-ban | admin-kick | admin-broadcast
+           group-create | group-list | group-info | group-members | group-invite
+           group-join | group-leave | group-dismiss | group-kick | group-role
+           group-mute | group-unmute | group-history | group-chat
+           signal-send | signal-listen
   flags: -server (default http://127.0.0.1:8080) -user -pass
          -device (default interactive) -devname -msg -to -listen (default 5s)
-         -target (friend-apply username; friend-respond/friend-delete user_id; admin-ban user_id)
-         -remark (friend-apply) -action2 accept|reject (friend-respond, default accept)
+         -target (friend-apply username; friend-respond/friend-delete user_id; admin-ban user_id;
+                  group-invite uid1,uid2; group-kick/group-role/group-mute user_id)
+         -remark (friend-apply) -action2 accept|reject (friend-respond, default accept);
+                  admin|member|owner (group-role); offer|answer|candidate (signal-send)
          -file -mediatype (default avatar) -access (default public) (media-upload)
-         -session (admin-kick) -msg (admin-broadcast content)
-  note: friend/media actions reuse the login session cache; admin actions need
+         -session (admin-kick) -msg (admin-broadcast content; group-create name;
+                  group-chat text; signal-send payload)
+         -group (group id for group-* actions) -limit (group-history page size, default 50)
+         -to (signal-send peer user_id) -listen (group-chat/signal-send/signal-listen window)
+  note: friend/media/group actions reuse the login session cache; admin actions need
         an admin login (e.g. -user superadmin).
 `)
 }
@@ -758,6 +1091,38 @@ func main() {
 		actAdminKick()
 	case "admin-broadcast":
 		actAdminBroadcast()
+	case "group-create":
+		actGroupCreate()
+	case "group-list":
+		actGroupList()
+	case "group-info":
+		actGroupInfo()
+	case "group-members":
+		actGroupMembers()
+	case "group-invite":
+		actGroupInvite()
+	case "group-join":
+		actGroupJoin()
+	case "group-leave":
+		actGroupLeave()
+	case "group-dismiss":
+		actGroupDismiss()
+	case "group-kick":
+		actGroupKick()
+	case "group-role":
+		actGroupRole()
+	case "group-mute":
+		actGroupMute(true)
+	case "group-unmute":
+		actGroupMute(false)
+	case "group-history":
+		actGroupHistory()
+	case "group-chat":
+		actGroupChat()
+	case "signal-send":
+		actSignalSend()
+	case "signal-listen":
+		actSignalListen()
 	default:
 		usage()
 		fatalf("unknown action %q", *fAction)
