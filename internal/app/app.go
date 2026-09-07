@@ -29,6 +29,7 @@ import (
 	"golang-im-neo-system/internal/logic/friend"
 	"golang-im-neo-system/internal/logic/group"
 	"golang-im-neo-system/internal/logic/media"
+	"golang-im-neo-system/internal/logic/message"
 	"golang-im-neo-system/internal/logic/profile"
 	"golang-im-neo-system/internal/logic/session"
 	"golang-im-neo-system/internal/middleware"
@@ -54,6 +55,7 @@ type App struct {
 	Admin   *admin.AdminService
 	Profile *profile.ProfileService
 	Group   *group.GroupService
+	Message *message.MessageService
 	Hub     *gateway.Hub
 	Router  *router.Router
 	Engine  *gin.Engine
@@ -107,17 +109,20 @@ func Build(cfg *config.Config) (*App, error) {
 	adminSvc := admin.NewAdminService(db, hub, zapLogger)
 	profileSvc := profile.NewProfileService(db, nil, zapLogger)
 	groupSvc := group.NewGroupService(db, zapLogger)
+	messageSvc := message.NewMessageService(db, zapLogger)
 
 	hs := handshake.NewHandler(hub, tickets /*TicketVerifier*/, zapLogger, nil /*secure default origin*/)
 
 	setGinMode(cfg.Server.Mode)
 	engine := gin.New()
-	engine.Use(gin.Recovery())
+	// [LAN-DEBUG-FLAG] Enable CORS middleware for LAN and separate frontend ports (5173/3000)
+	engine.Use(gin.Recovery(), middleware.CORSMiddleware())
 	auth.RegisterRoutes(engine.Group("/api/v1/auth"), authSvc, tickets, jwtMW)
 	friend.RegisterRoutes(engine.Group("/api/v1/friends"), friendSvc, jwtMW)
 	group.RegisterRoutes(engine.Group("/api/v1/groups"), groupSvc, jwtMW)
 	media.RegisterRoutes(engine.Group("/api/v1/media"), mediaSvc, jwtMW)
 	profile.RegisterRoutes(engine.Group("/api/v1/profile"), engine.Group("/api/v1/posts"), profileSvc, jwtMW)
+	message.RegisterRoutes(engine.Group("/api/v1/messages"), messageSvc, jwtMW)
 	admin.RegisterRoutes(engine.Group("/api/v1/admin"), adminSvc, jwtMW, adminMW)
 	engine.GET("/ws", hs.ServeWS)
 
@@ -133,7 +138,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Config: cfg, Logger: zapLogger, DB: db,
 		Batch: batchWriter, Alloc: allocator,
 		Auth: authSvc, Tickets: tickets,
-		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Profile: profileSvc, Group: groupSvc,
+		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Profile: profileSvc, Group: groupSvc, Message: messageSvc,
 		Hub: hub, Router: rtr, Engine: engine,
 	}, nil
 }
