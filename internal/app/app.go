@@ -1,6 +1,6 @@
 // Package app wires the Stage-1 layers (store/auth/handshake+gateway/
-// router) plus the Stage-2 services (friend/media/admin) into one runnable
-// server (MISSIONS M5 + M4).
+// router) plus the Stage-2 services (friend/media/admin) and the Stage-4
+// group service into one runnable server (MISSIONS M5 + M4, Stage-4 M1/M2/M3).
 //
 // Layer flow (docs/DECOUPLED_ARCHITECTURE_SPEC.md):
 //
@@ -27,6 +27,7 @@ import (
 	"golang-im-neo-system/internal/logic/admin"
 	"golang-im-neo-system/internal/logic/auth"
 	"golang-im-neo-system/internal/logic/friend"
+	"golang-im-neo-system/internal/logic/group"
 	"golang-im-neo-system/internal/logic/media"
 	"golang-im-neo-system/internal/logic/session"
 	"golang-im-neo-system/internal/middleware"
@@ -50,6 +51,7 @@ type App struct {
 	Friend  *friend.FriendService
 	Media   *media.MediaService
 	Admin   *admin.AdminService
+	Group   *group.GroupService
 	Hub     *gateway.Hub
 	Router  *router.Router
 	Engine  *gin.Engine
@@ -101,6 +103,7 @@ func Build(cfg *config.Config) (*App, error) {
 	friendSvc := friend.NewFriendService(db, hub, rtr, zapLogger)
 	mediaSvc := media.NewMediaService(db, cfg, zapLogger)
 	adminSvc := admin.NewAdminService(db, hub, zapLogger)
+	groupSvc := group.NewGroupService(db, zapLogger)
 
 	hs := handshake.NewHandler(hub, tickets /*TicketVerifier*/, zapLogger, nil /*secure default origin*/)
 
@@ -109,6 +112,7 @@ func Build(cfg *config.Config) (*App, error) {
 	engine.Use(gin.Recovery())
 	auth.RegisterRoutes(engine.Group("/api/v1/auth"), authSvc, tickets, jwtMW)
 	friend.RegisterRoutes(engine.Group("/api/v1/friends"), friendSvc, jwtMW)
+	group.RegisterRoutes(engine.Group("/api/v1/groups"), groupSvc, jwtMW)
 	media.RegisterRoutes(engine.Group("/api/v1/media"), mediaSvc, jwtMW)
 	admin.RegisterRoutes(engine.Group("/api/v1/admin"), adminSvc, jwtMW, adminMW)
 	engine.GET("/ws", hs.ServeWS)
@@ -121,7 +125,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Config: cfg, Logger: zapLogger, DB: db,
 		Batch: batchWriter, Alloc: allocator,
 		Auth: authSvc, Tickets: tickets,
-		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc,
+		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Group: groupSvc,
 		Hub: hub, Router: rtr, Engine: engine,
 	}, nil
 }
