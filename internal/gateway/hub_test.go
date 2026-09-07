@@ -389,3 +389,88 @@ func TestKickSession(t *testing.T) {
 		t.Fatalf("Count = %d, want 2", got)
 	}
 }
+
+func TestSendToUsersMultiCast(t *testing.T) {
+	h := newTestHub()
+	a1 := newTestClient(h, "alice", "interactive", "s-a1")
+	a2 := newTestClient(h, "alice", "interactive", "s-a2")
+	b1 := newTestClient(h, "bob", "hardware", "s-b1")
+	b2 := newTestClient(h, "bob", "hardware", "s-b2")
+	c1 := newTestClient(h, "carol", "interactive", "s-c1")
+	d1 := newTestClient(h, "dave", "hardware", "s-d1")
+	for _, c := range []*Client{a1, a2, b1, b2, c1, d1} {
+		h.Register(c)
+	}
+	waitForCount(t, h, 6, 2*time.Second)
+
+	// Long GROUP_CHAT frame: interactive full, hardware truncated.
+	long := strings.Repeat("G", 1000)
+	m := &improto.WsMessage{Type: improto.MsgType_GROUP_CHAT, FromUid: "sender", ToUid: "g1", Content: long}
+	frame, err := proto.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if len(frame) <= HardwareFrameThreshold {
+		t.Fatalf("test frame should exceed %d bytes, got %d", HardwareFrameThreshold, len(frame))
+	}
+
+	// dave is online but unlisted; ghost is listed but offline/unknown.
+	n := h.SendToUsers([]string{"alice", "bob", "carol", "ghost", ""}, frame)
+	if n != 5 {
+		t.Fatalf("SendToUsers count = %d, want 5 (2 alice + 2 bob + 1 carol)", n)
+	}
+
+	// Interactive sessions receive the verbatim frame (marshal-once).
+	for i, c := range []*Client{a1, a2, c1} {
+		got := recvTimeout(t, c.Send, time.Second)
+		if !bytes.Equal(got, frame) {
+			t.Fatalf("interactive client %d must receive original bytes", i)
+		}
+	}
+
+	// Hardware sessions share ONE lazily-computed truncated variant.
+	h1 := recvTimeout(t, b1.Send, time.Second)
+	h2 := recvTimeout(t, b2.Send, time.Second)
+	if !bytes.Equal(h1, h2) {
+		t.Fatalf("hardware recipients must share the single lazy variant")
+	}
+	var hwMsg improto.WsMessage
+	if err := proto.Unmarshal(h1, &hwMsg); err != nil {
+		t.Fatalf("hardware frame should still be valid proto: %v", err)
+	}
+	if hwMsg.Type != improto.MsgType_GROUP_CHAT || hwMsg.FromUid != "sender" || hwMsg.ToUid != "g1" {
+		t.Fatalf("hardware frame identity must survive truncation: %v", &hwMsg)
+	}
+	if len(hwMsg.Content) > HardwareContentBudget {
+		t.Fatalf("hardware content %d bytes exceeds %d", len(hwMsg.Content), HardwareContentBudget)
+	}
+	if !strings.HasSuffix(hwMsg.Content, TruncateSuffix) {
+		t.Fatalf("hardware content should end with truncation suffix")
+	}
+	if !utf8.ValidString(hwMsg.Content) {
+		t.Fatalf("hardware content must be valid UTF-8")
+	}
+
+	// Unlisted online user receives nothing.
+	if m, ok := tryRecv(d1.Send); ok {
+		t.Fatalf("unlisted user should receive nothing, got %d bytes", len(m))
+	}
+
+	// Small frames pass through untouched to hardware too; empty list sends 0.
+	small := &improto.WsMessage{Type: improto.MsgType_GROUP_CHAT, Content: "hi"}
+	smallFrame, err := proto.Marshal(small)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if n := h.SendToUsers([]string{"bob"}, smallFrame); n != 2 {
+		t.Fatalf("small SendToUsers count = %d, want 2", n)
+	}
+	for _, c := range []*Client{b1, b2} {
+		if got := recvTimeout(t, c.Send, time.Second); !bytes.Equal(got, smallFrame) {
+			t.Fatalf("small frames must pass through untouched")
+		}
+	}
+	if n := h.SendToUsers(nil, frame); n != 0 {
+		t.Fatalf("empty SendToUsers count = %d, want 0", n)
+	}
+}

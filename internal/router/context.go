@@ -24,6 +24,12 @@ const (
 	// CodeFriendNotFound (30001, ERR_FRIEND_NOT_FOUND): private chat blocked,
 	// sender is not friends with the recipient.
 	CodeFriendNotFound = 30001
+	// CodeGroupNotMember (40002, ERR_GROUP_NOT_MEMBER): group chat blocked,
+	// sender is not an active member of the target group (M2).
+	CodeGroupNotMember = 40002
+	// CodeGroupMuted (40005, ERR_GROUP_MUTED): group chat blocked,
+	// sender is muted in the target group (M2, live check, never cached).
+	CodeGroupMuted = 40005
 	// CodeInternalError (50001, ERR_INTERNAL_SERVER): seq allocation or
 	// persistence failed.
 	CodeInternalError = 50001
@@ -50,8 +56,11 @@ var _ Persister = (*store.BatchWriter)(nil)
 
 // Emitter is the outbound delivery port (Contract B, verbatim).
 // The production implementation is M3's *gateway.Hub (structural match).
+// M2 adds SendToUsers for group fan-out (one marshaled frame to every
+// session of every listed user; the Hub applies the hardware variant).
 type Emitter interface {
 	SendToUser(userID string, msg []byte) bool
+	SendToUsers(userIDs []string, msg []byte) int
 	Broadcast(msg []byte)
 	IsOnline(userID string) bool
 	KickUser(userID, reason string)

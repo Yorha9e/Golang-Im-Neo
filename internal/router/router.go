@@ -24,6 +24,7 @@ type Router struct {
 	dedup        *DedupWindows
 	limiter      *rateLimiter
 	friends      *friendCache
+	groups       *friendCache
 	strategy     RelayStrategy
 	interceptors []Interceptor
 }
@@ -44,12 +45,14 @@ func New(emitter Emitter, persister Persister, alloc *session.Allocator, db *gor
 		dedup:     NewDedupWindows(),
 		limiter:   newRateLimiter(),
 		friends:   newFriendCache(friendCacheCap, friendCacheTTL),
+		groups:    newFriendCache(friendCacheCap, friendCacheTTL),
 	}
-	r.strategy = NewCentralRelayStrategy(emitter, persister, alloc, r.dedup, logger)
+	r.strategy = NewCentralRelayStrategy(emitter, persister, alloc, db, r.dedup, logger)
 	r.interceptors = []Interceptor{
 		r.rateLimitInterceptor,
 		r.securityIdentityInterceptor,
 		r.friendshipCheckInterceptor,
+		r.groupChatInterceptor,
 	}
 	return r
 }
@@ -90,7 +93,9 @@ func (r *Router) HandleInbound(userID, sessionID, deviceClass string, frame []by
 
 // dispatch routes post-interceptor frames by type:
 // HEARTBEAT_PING -> PONG (no persist); CHAT -> broadcast; PRIVATE_CHAT ->
-// relay; ACK / SIGNALING_* / everything else -> log + drop (stage-2/4).
+// relay; GROUP_CHAT -> membership/mute-gated group relay + fan-out;
+// SIGNALING_* -> in-memory P2P bypass (never persisted); ACK / everything
+// else -> log + drop.
 func (r *Router) dispatch(ctx *MessageContext) error {
 	switch ctx.Msg.GetType() {
 	case pb.MsgType_HEARTBEAT_PING:
@@ -115,6 +120,22 @@ func (r *Router) dispatch(ctx *MessageContext) error {
 			return nil
 		}
 		return r.strategy.RoutePrivate(ctx)
+	case pb.MsgType_GROUP_CHAT:
+		if ctx.Msg.GetToUid() == "" {
+			r.logger.Warn("router: drop group chat without group id",
+				zap.String("user", ctx.UserID))
+			sendPlainNoticeTo(r.emitter, r.logger, ctx.UserID, "missing recipient, dropped")
+			return nil
+		}
+		return r.strategy.RouteGroup(ctx)
+	case pb.MsgType_SIGNALING_OFFER, pb.MsgType_SIGNALING_ANSWER, pb.MsgType_SIGNALING_CANDIDATE:
+		if ctx.Msg.GetToUid() == "" {
+			r.logger.Warn("router: drop signaling without peer",
+				zap.String("user", ctx.UserID))
+			sendPlainNoticeTo(r.emitter, r.logger, ctx.UserID, "missing recipient, dropped")
+			return nil
+		}
+		return r.routeSignaling(ctx)
 	default:
 		r.logger.Debug("router: drop unsupported type",
 			zap.String("user", ctx.UserID),

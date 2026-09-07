@@ -159,6 +159,59 @@ func (h *Hub) SendToUser(userID string, msg []byte) bool {
 	return sent
 }
 
+// SendToUsers fans out one marshaled frame to every online session of every
+// listed user in a SINGLE pass over the 32 shards. Interactive sessions get
+// msg verbatim (marshal-once); hardware sessions (DeviceClass=="hardware"
+// with len(msg) > HardwareFrameThreshold) share ONE lazily-computed
+// adaptForHardware variant. Slow clients trip the backpressure breaker and
+// are kicked via go h.kickClient(c). Returns the count of sessions enqueued.
+// (M2 group fan-out; the sender's membership yields echo-to-sender.)
+func (h *Hub) SendToUsers(userIDs []string, msg []byte) int {
+	if len(userIDs) == 0 {
+		return 0
+	}
+	want := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		if id != "" {
+			want[id] = struct{}{}
+		}
+	}
+	if len(want) == 0 {
+		return 0
+	}
+	// Lazily computed hardware variant, shared across ALL hardware recipients.
+	var hwVariant []byte
+	hwReady := false
+	getHardware := func() []byte {
+		if !hwReady {
+			hwVariant = adaptForHardware(msg)
+			hwReady = true
+		}
+		return hwVariant
+	}
+	sent := 0
+	for i := 0; i < ShardCount; i++ {
+		h.buckets[i].RLock()
+		for _, c := range h.buckets[i].clients {
+			if _, ok := want[c.UserID]; !ok {
+				continue
+			}
+			payload := msg
+			if c.DeviceClass == "hardware" && len(msg) > HardwareFrameThreshold {
+				payload = getHardware()
+			}
+			if ok := c.Enqueue(payload); !ok {
+				// Backpressure: kick slow client asynchronously to avoid deadlock in RLock.
+				go h.kickClient(c)
+			} else {
+				sent++
+			}
+		}
+		h.buckets[i].RUnlock()
+	}
+	return sent
+}
+
 // Broadcast fans out a single marshaled frame to every connected client.
 // Marshal-Once is done by the caller (router): interactive clients receive the
 // exact input bytes; hardware clients receive the truncated variant when needed.
