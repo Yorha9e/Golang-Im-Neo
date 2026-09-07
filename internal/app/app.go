@@ -1,0 +1,153 @@
+// Package app wires the four Stage-1 layers (store/auth/handshake+gateway/
+// router) into one runnable server (MISSION M5).
+//
+// Layer flow (docs/DECOUPLED_ARCHITECTURE_SPEC.md):
+//
+//	HTTP register/login/ticket -> auth.AuthService + auth.TicketService
+//	WS /ws?ticket=...          -> handshake.Handler (redeem-then-upgrade)
+//	frames                     -> gateway.Hub -> router.Router (interceptor
+//	                            chain -> CentralRelayStrategy -> store.BatchWriter)
+//
+// Config load stays OUTSIDE: the caller passes a loaded *config.Config and
+// Build owns logger, DB open, superadmin seed, allocator, batchWriter, hub,
+// router, handshake and route registration.
+package app
+
+import (
+	"fmt"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+
+	"golang-im-neo-system/internal/config"
+	"golang-im-neo-system/internal/gateway"
+	"golang-im-neo-system/internal/handshake"
+	"golang-im-neo-system/internal/logic/auth"
+	"golang-im-neo-system/internal/logic/session"
+	"golang-im-neo-system/internal/middleware"
+	"golang-im-neo-system/internal/router"
+	"golang-im-neo-system/internal/store"
+	"golang-im-neo-system/pkg/logger"
+)
+
+// App is the fully-wired Stage-1 server. Engine is served by cmd/server;
+// Hub/DB are exported so integration tests can drive real WS clients and
+// seed rows directly.
+type App struct {
+	Config *config.Config
+	Logger *zap.Logger
+	DB     *gorm.DB
+
+	Batch   *store.BatchWriter
+	Alloc   *session.Allocator
+	Auth    *auth.AuthService
+	Tickets *auth.TicketService
+	Hub     *gateway.Hub
+	Router  *router.Router
+	Engine  *gin.Engine
+}
+
+// Build wires every layer per the M5 contract and returns a ready-to-serve App.
+func Build(cfg *config.Config) (*App, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("app: nil config")
+	}
+
+	zapLogger, err := logger.New(cfg.Server.Mode)
+	if err != nil {
+		return nil, fmt.Errorf("app: init logger: %w", err)
+	}
+
+	db, err := cfg.OpenDB()
+	if err != nil {
+		return nil, fmt.Errorf("app: open db: %w", err)
+	}
+
+	if err := config.SeedSuperAdmin(db, cfg); err != nil {
+		closeDB(db)
+		return nil, fmt.Errorf("app: seed superadmin: %w", err)
+	}
+
+	batchWriter := store.NewBatchWriter(db, zapLogger)
+	batchWriter.Start()
+
+	allocator := session.NewAllocator(db)
+	if err := allocator.LoadAll(); err != nil {
+		// Warn-non-fatal: lazy load on first Allocate covers a cold start.
+		zapLogger.Warn("app: allocator preload failed (non-fatal)", zap.Error(err))
+	}
+
+	authSvc := auth.NewAuthService(db, cfg)
+	tickets := auth.NewTicketService()
+	jwtMW := middleware.JWTAuthMiddleware(cfg.Security.JWTSecret, db)
+
+	hub := gateway.NewHub(zapLogger)
+	go hub.Run()
+
+	rtr := router.New(hub /*Emitter*/, batchWriter /*Persister*/, allocator, db, zapLogger)
+	hub.SetInboundHandler(rtr) // *router.Router satisfies gateway.InboundHandler
+
+	hs := handshake.NewHandler(hub, tickets /*TicketVerifier*/, zapLogger, nil /*secure default origin*/)
+
+	setGinMode(cfg.Server.Mode)
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	auth.RegisterRoutes(engine.Group("/api/v1/auth"), authSvc, tickets, jwtMW)
+	engine.GET("/ws", hs.ServeWS)
+
+	zapLogger.Info("app wired",
+		zap.String("addr", cfg.Addr()),
+		zap.String("db", cfg.Database.Path))
+
+	return &App{
+		Config: cfg, Logger: zapLogger, DB: db,
+		Batch: batchWriter, Alloc: allocator,
+		Auth: authSvc, Tickets: tickets,
+		Hub: hub, Router: rtr, Engine: engine,
+	}, nil
+}
+
+// Close shuts the app down gracefully: it stops the batch writer (drain-flush
+// so every queued message is persisted and every sync waiter gets its result)
+// and then closes the DB handle. Hub connections just die with the process —
+// there is no cross-process session migration in Stage-1; clients reconnect
+// with a fresh ticket and stanza-id retries dedup server-side.
+func (a *App) Close() error {
+	if a == nil {
+		return nil
+	}
+	if a.Batch != nil {
+		a.Batch.Stop()
+	}
+	if a.DB != nil {
+		if sqlDB, err := a.DB.DB(); err == nil && sqlDB != nil {
+			if err := sqlDB.Close(); err != nil {
+				return fmt.Errorf("app: close db: %w", err)
+			}
+		}
+	}
+	if a.Logger != nil {
+		_ = a.Logger.Sync()
+	}
+	return nil
+}
+
+func closeDB(db *gorm.DB) {
+	if sqlDB, err := db.DB(); err == nil && sqlDB != nil {
+		_ = sqlDB.Close()
+	}
+}
+
+// setGinMode maps the config server.mode to a gin mode. Unknown values fall
+// back to debug; "test" keeps test output quiet.
+func setGinMode(mode string) {
+	switch mode {
+	case "release", "production":
+		gin.SetMode(gin.ReleaseMode)
+	case "test":
+		gin.SetMode(gin.TestMode)
+	default:
+		gin.SetMode(gin.DebugMode)
+	}
+}
