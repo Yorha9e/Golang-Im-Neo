@@ -94,6 +94,8 @@ func NewDB(cfg DBConfig) (*gorm.DB, error) {
 		&Message{},
 		&MediaAsset{},
 		&UserPost{},
+		&Group{},
+		&GroupMember{},
 	); err != nil {
 		return nil, fmt.Errorf("auto migrate: %w", err)
 	}
