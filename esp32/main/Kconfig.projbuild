@@ -1,0 +1,38 @@
+menu "ESP32 IM Client"
+
+    config ESP_IM_WIFI_SSID
+        string "WiFi SSID"
+        default "test-ap"
+        help
+            STA SSID the C3 joins on boot.
+
+    config ESP_IM_WIFI_PASSWORD
+        string "WiFi password"
+        default "test-password"
+        help
+            WPA2 passphrase for the SSID above.
+
+    config ESP_IM_SERVER_HOST
+        string "IM server host (bare IP or DNS, no scheme)"
+        default "192.168.1.100"
+        help
+            Host for http://<host>:<port>/api/... and ws://<host>:<port>/ws.
+
+    config ESP_IM_SERVER_PORT
+        int "IM server HTTP port"
+        range 1 65535
+        default 8080
+        help
+            Must match the Go server listen port (config.toml `port`).
+
+    config ESP_IM_AUTH_USERNAME
+        string "IM username"
+        default "esp32c3-01"
+        help
+            Sent as {"username",...,"device_class":"hardware",...} to login.
+
+    config ESP_IM_AUTH_PASSWORD
+        string "IM password"
+        default "esp32-pass"
+
+endmenu
