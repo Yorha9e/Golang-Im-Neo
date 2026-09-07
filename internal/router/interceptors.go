@@ -9,6 +9,7 @@ import (
 
 	pb "golang-im-neo-system/proto"
 
+	"golang-im-neo-system/internal/logic/group"
 	"golang-im-neo-system/internal/logic/session"
 	"golang-im-neo-system/internal/store"
 )
@@ -191,6 +192,77 @@ func (c *friendCache) invalidate(key string) {
 // Exported for stage-2 friend apply/accept/unfriend/block flows.
 func (r *Router) Invalidate(covKey string) {
 	r.friends.invalidate(covKey)
+}
+
+// InvalidateGroupMember drops one cached group-membership verdict
+// (key grp:<groupID>:<userID>). Exported for future group kick/leave/mute
+// flows; mute itself needs no invalidation (checked live every time).
+func (r *Router) InvalidateGroupMember(groupID, userID string) {
+	r.groups.invalidate(groupMemberKey(groupID, userID))
+}
+
+// groupMemberKey is the group membership cache key (mirrors the friendCache
+// private-cov-id keying with a distinct grp: namespace).
+func groupMemberKey(groupID, userID string) string {
+	return "grp:" + groupID + ":" + userID
+}
+
+// groupChatInterceptor gates GROUP_CHAT on active membership + live mute.
+// Miss path probes group.IsMember (allow AND deny cached 60s); mute is then
+// probed LIVE via group.IsMuted on every frame so moderation takes effect
+// immediately. Deny => coded SYSTEM_NOTICE (40002 / 40005); NO persist,
+// NO push. Non-group frames pass through. DB errors fail closed with 50001
+// and are NOT cached.
+func (r *Router) groupChatInterceptor(ctx *MessageContext, next func() error) error {
+	if ctx.Msg.GetType() != pb.MsgType_GROUP_CHAT {
+		return next()
+	}
+	gid := ctx.Msg.GetToUid()
+	if gid == "" {
+		return next() // dispatch reports missing-recipient; no DB trip needed
+	}
+	key := groupMemberKey(gid, ctx.UserID)
+	if allowed, ok := r.groups.get(key); ok {
+		if !allowed {
+			sendCodeNoticeTo(r.emitter, r.logger, ctx.UserID,
+				CodeGroupNotMember, "not a group member", "not a group member, message dropped")
+			return nil
+		}
+	} else {
+		ok, err := group.IsMember(r.db, gid, ctx.UserID)
+		if err != nil {
+			r.logger.Error("router: group membership lookup failed",
+				zap.String("group", gid), zap.String("from", ctx.UserID), zap.Error(err))
+			sendCodeNoticeTo(r.emitter, r.logger, ctx.UserID,
+				CodeInternalError, "internal error", "internal error, please retry")
+			return nil
+		}
+		r.groups.add(key, ok)
+		if !ok {
+			r.logger.Info("router: group chat blocked, not a member",
+				zap.String("group", gid), zap.String("from", ctx.UserID))
+			sendCodeNoticeTo(r.emitter, r.logger, ctx.UserID,
+				CodeGroupNotMember, "not a group member", "not a group member, message dropped")
+			return nil
+		}
+	}
+	// Mute is deliberately uncached: a mute/unmute must bite on the next frame.
+	muted, err := group.IsMuted(r.db, gid, ctx.UserID)
+	if err != nil {
+		r.logger.Error("router: group mute lookup failed",
+			zap.String("group", gid), zap.String("from", ctx.UserID), zap.Error(err))
+		sendCodeNoticeTo(r.emitter, r.logger, ctx.UserID,
+			CodeInternalError, "internal error", "internal error, please retry")
+		return nil
+	}
+	if muted {
+		r.logger.Info("router: group chat blocked, muted",
+			zap.String("group", gid), zap.String("from", ctx.UserID))
+		sendCodeNoticeTo(r.emitter, r.logger, ctx.UserID,
+			CodeGroupMuted, "muted in group", "muted in group, message dropped")
+		return nil
+	}
+	return next()
 }
 
 // friendshipCheckInterceptor gates PRIVATE_CHAT on an accepted friendship row.

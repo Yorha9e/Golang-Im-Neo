@@ -31,6 +31,7 @@ type fakeEmitter struct {
 	toUser     map[string][][]byte
 	broadcasts [][]byte
 	kicked     []string
+	offline    map[string]bool
 }
 
 func newFakeEmitter() *fakeEmitter {
@@ -52,7 +53,42 @@ func (f *fakeEmitter) Broadcast(msg []byte) {
 	f.broadcasts = append(f.broadcasts, cp)
 }
 
-func (f *fakeEmitter) IsOnline(userID string) bool { return true }
+func (f *fakeEmitter) IsOnline(userID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.offline[userID]
+}
+
+// setOffline toggles simulated presence (default: everybody online).
+// SendToUsers skips offline users; SendToUser still records (unit-test
+// visibility into pushes regardless of presence).
+func (f *fakeEmitter) setOffline(userID string, off bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.offline == nil {
+		f.offline = make(map[string]bool)
+	}
+	if off {
+		f.offline[userID] = true
+	} else {
+		delete(f.offline, userID)
+	}
+}
+
+// SendToUsers records one copy per online listed user (M2 group fan-out fake).
+func (f *fakeEmitter) SendToUsers(userIDs []string, msg []byte) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, id := range userIDs {
+		if f.offline[id] {
+			continue
+		}
+		f.toUser[id] = append(f.toUser[id], append([]byte(nil), msg...))
+		n++
+	}
+	return n
+}
 
 func (f *fakeEmitter) KickUser(userID, reason string) {
 	f.mu.Lock()
@@ -569,12 +605,10 @@ func TestPersistErrorYields50001(t *testing.T) {
 func TestUnsupportedTypesDropped(t *testing.T) {
 	r, _, em, ps := newTestSetup(t)
 
+	// NOTE (M2): GROUP_CHAT and SIGNALING_* are routed now (see
+	// group_signaling_test.go); only truly unhandled types drop here.
 	for _, typ := range []pb.MsgType{
 		pb.MsgType_ACK,
-		pb.MsgType_SIGNALING_OFFER,
-		pb.MsgType_SIGNALING_ANSWER,
-		pb.MsgType_SIGNALING_CANDIDATE,
-		pb.MsgType_GROUP_CHAT,
 		pb.MsgType_UNKNOWN,
 	} {
 		r.HandleInbound("u_a", "s", "interactive", mustFrame(t, &pb.WsMessage{

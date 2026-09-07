@@ -7,9 +7,11 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"gorm.io/gorm"
 
 	pb "golang-im-neo-system/proto"
 
+	"golang-im-neo-system/internal/logic/group"
 	"golang-im-neo-system/internal/logic/session"
 	"golang-im-neo-system/internal/store"
 )
@@ -21,24 +23,30 @@ const persistTimeout = 2 * time.Second
 
 // RelayStrategy is the delivery-strategy slot (SSOT 层级3 verbatim).
 // Stage-1 ships CentralRelayStrategy; P2PStrategy is a stage-4 slot.
+// M2 adds RouteGroup (persisted group fan-out with echo-to-sender).
 type RelayStrategy interface {
 	RoutePrivate(ctx *MessageContext) error
 	RouteBroadcast(ctx *MessageContext) error
+	RouteGroup(ctx *MessageContext) error
 }
 
-// CentralRelayStrategy implements both routes over one shared pipeline:
+// CentralRelayStrategy implements all routes over one shared pipeline:
 // covID -> dedup lookup (replay ACK, no persist/push) -> alloc seq ->
 // build store.Message -> EnqueueSync (2s) -> Duplicated? ACK-only : ACK + push.
+// Only the final push differs per route (1-1 / broadcast / group fan-out).
 type CentralRelayStrategy struct {
 	emitter   Emitter
 	persister Persister
 	alloc     *session.Allocator
+	db        *gorm.DB
 	dedup     *DedupWindows
 	logger    *zap.Logger
 }
 
 // NewCentralRelayStrategy builds the default central-relay pipeline.
-func NewCentralRelayStrategy(emitter Emitter, persister Persister, alloc *session.Allocator, dedup *DedupWindows, logger *zap.Logger) *CentralRelayStrategy {
+// db backs group fan-out member listing (M2); it may be nil only when
+// RouteGroup is never called.
+func NewCentralRelayStrategy(emitter Emitter, persister Persister, alloc *session.Allocator, db *gorm.DB, dedup *DedupWindows, logger *zap.Logger) *CentralRelayStrategy {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -49,6 +57,7 @@ func NewCentralRelayStrategy(emitter Emitter, persister Persister, alloc *sessio
 		emitter:   emitter,
 		persister: persister,
 		alloc:     alloc,
+		db:        db,
 		dedup:     dedup,
 		logger:    logger,
 	}
@@ -62,16 +71,46 @@ var _ RelayStrategy = (*CentralRelayStrategy)(nil)
 func (s *CentralRelayStrategy) RoutePrivate(ctx *MessageContext) error {
 	to := ctx.Msg.GetToUid()
 	covID := session.BuildPrivateCovID(ctx.UserID, to)
-	return s.relay(ctx, covID, "chat", to, false)
+	return s.relay(ctx, covID, "chat", to, func(b []byte) error {
+		s.emitter.SendToUser(to, b)
+		return nil
+	})
 }
 
 // RouteBroadcast relays a hall message; covID is the const public hall,
 // chatType "groupchat".
 func (s *CentralRelayStrategy) RouteBroadcast(ctx *MessageContext) error {
-	return s.relay(ctx, PublicHallCovID, "groupchat", "", true)
+	return s.relay(ctx, PublicHallCovID, "groupchat", "", func(b []byte) error {
+		s.emitter.Broadcast(b)
+		return nil
+	})
 }
 
-func (s *CentralRelayStrategy) relay(ctx *MessageContext, covID, chatType, toUID string, broadcast bool) error {
+// RouteGroup relays a group message: covID is group.BuildCovID(gid),
+// chatType "groupchat", store.Message.ToUID = gid. The shared relay pipeline
+// runs verbatim (dedup -> alloc -> EnqueueSync -> ACK -> push); the push
+// fans out to every active member via Emitter.SendToUsers. The sender is a
+// member, so its own sessions receive the frame (echo-to-sender for
+// multi-device timeline alignment; clients dedupe by stanza_id) on top of
+// the ACK frame every route emits.
+func (s *CentralRelayStrategy) RouteGroup(ctx *MessageContext) error {
+	gid := ctx.Msg.GetToUid()
+	covID := group.BuildCovID(gid)
+	return s.relay(ctx, covID, "groupchat", gid, func(b []byte) error {
+		members, err := group.ListActiveMemberIDs(s.db, gid)
+		if err != nil {
+			s.logger.Error("router: group fan-out member listing failed",
+				zap.String("group", gid), zap.Error(err))
+			sendCodeNoticeTo(s.emitter, s.logger, ctx.UserID,
+				CodeInternalError, "internal error", "internal error, please retry")
+			return fmt.Errorf("router: list group members %s: %w", gid, err)
+		}
+		s.emitter.SendToUsers(members, b)
+		return nil
+	})
+}
+
+func (s *CentralRelayStrategy) relay(ctx *MessageContext, covID, chatType, toUID string, deliver func([]byte) error) error {
 	stanza := ctx.Msg.GetStanzaId()
 	msgType := ctx.Msg.GetType()
 
@@ -159,12 +198,7 @@ func (s *CentralRelayStrategy) relay(ctx *MessageContext, covID, chatType, toUID
 			zap.String("cov", covID), zap.Error(err))
 		return err
 	}
-	if broadcast {
-		s.emitter.Broadcast(b)
-	} else {
-		s.emitter.SendToUser(toUID, b)
-	}
-	return nil
+	return deliver(b)
 }
 
 // sendAck emits the ACK闭环 frame: {ACK, seq, ts, stanza, to=sender}.
