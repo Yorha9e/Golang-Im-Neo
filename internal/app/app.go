@@ -1,5 +1,5 @@
 // Package app wires the Stage-1 layers (store/auth/handshake+gateway/
-// router) plus the Stage-2 services (friend/media/admin) and the Stage-4
+// router) plus the Stage-2 services (friend/media/admin/profile) and the Stage-4
 // group service into one runnable server (MISSIONS M5 + M4, Stage-4 M1/M2/M3).
 //
 // Layer flow (docs/DECOUPLED_ARCHITECTURE_SPEC.md):
@@ -29,6 +29,7 @@ import (
 	"golang-im-neo-system/internal/logic/friend"
 	"golang-im-neo-system/internal/logic/group"
 	"golang-im-neo-system/internal/logic/media"
+	"golang-im-neo-system/internal/logic/profile"
 	"golang-im-neo-system/internal/logic/session"
 	"golang-im-neo-system/internal/middleware"
 	"golang-im-neo-system/internal/router"
@@ -51,6 +52,7 @@ type App struct {
 	Friend  *friend.FriendService
 	Media   *media.MediaService
 	Admin   *admin.AdminService
+	Profile *profile.ProfileService
 	Group   *group.GroupService
 	Hub     *gateway.Hub
 	Router  *router.Router
@@ -103,6 +105,7 @@ func Build(cfg *config.Config) (*App, error) {
 	friendSvc := friend.NewFriendService(db, hub, rtr, zapLogger)
 	mediaSvc := media.NewMediaService(db, cfg, zapLogger)
 	adminSvc := admin.NewAdminService(db, hub, zapLogger)
+	profileSvc := profile.NewProfileService(db, nil, zapLogger)
 	groupSvc := group.NewGroupService(db, zapLogger)
 
 	hs := handshake.NewHandler(hub, tickets /*TicketVerifier*/, zapLogger, nil /*secure default origin*/)
@@ -114,6 +117,7 @@ func Build(cfg *config.Config) (*App, error) {
 	friend.RegisterRoutes(engine.Group("/api/v1/friends"), friendSvc, jwtMW)
 	group.RegisterRoutes(engine.Group("/api/v1/groups"), groupSvc, jwtMW)
 	media.RegisterRoutes(engine.Group("/api/v1/media"), mediaSvc, jwtMW)
+	profile.RegisterRoutes(engine.Group("/api/v1/profile"), engine.Group("/api/v1/posts"), profileSvc, jwtMW)
 	admin.RegisterRoutes(engine.Group("/api/v1/admin"), adminSvc, jwtMW, adminMW)
 	engine.GET("/ws", hs.ServeWS)
 
@@ -129,7 +133,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Config: cfg, Logger: zapLogger, DB: db,
 		Batch: batchWriter, Alloc: allocator,
 		Auth: authSvc, Tickets: tickets,
-		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Group: groupSvc,
+		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Profile: profileSvc, Group: groupSvc,
 		Hub: hub, Router: rtr, Engine: engine,
 	}, nil
 }
