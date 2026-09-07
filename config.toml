@@ -22,3 +22,10 @@ wal_checkpoint_truncate = true
 username = "superadmin"
 password = "SuperAdmin123!"
 email = "admin@golang-im.local"
+
+[media]
+storage_dir = "./data/media"
+max_avatar_bytes = 2097152
+max_file_bytes = 20971520
+allowed_avatar_exts = ".jpg,.jpeg,.png,.gif,.webp"
+allowed_file_exts = ".jpg,.jpeg,.png,.gif,.webp,.aac,.mp3,.wav,.mp4"
