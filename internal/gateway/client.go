@@ -11,6 +11,7 @@ import (
 // It implements the Gateway's readPump/writePump separation, heartbeat, and backpressure handling.
 type Client struct {
 	UserID      string
+	Username    string
 	DeviceClass string // interactive | hardware
 	SessionID   string
 	Conn        *websocket.Conn
@@ -36,7 +37,12 @@ const (
 )
 
 // NewClient creates a new gateway client.
+// Signature is pinned by the handshake contract: (hub, conn, userID, deviceClass, sessionID, logger).
+// Username can be set post-construction (client.Username = ...) for log enrichment.
 func NewClient(hub *Hub, conn *websocket.Conn, userID, deviceClass, sessionID string, logger *zap.Logger) *Client {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &Client{
 		UserID:      userID,
 		DeviceClass: deviceClass,
@@ -48,18 +54,22 @@ func NewClient(hub *Hub, conn *websocket.Conn, userID, deviceClass, sessionID st
 	}
 }
 
-// ReadPump pumps messages from the WebSocket connection to the hub.
-// It enforces SetReadLimit(64KB) and handles Pong.
+// ReadPump pumps messages from the WebSocket connection to the router's InboundHandler.
+// It enforces SetReadLimit(64KB) and handles Pong (60s). Every inbound binary frame
+// is delivered synchronously via handler.HandleInbound(userID, sessionID, deviceClass, message).
+// Nil handler -> drop + debug log. Inbound business frames never go to broadcast.
 func (c *Client) ReadPump() {
 	defer func() {
 		c.hub.Unregister(c)
-		c.Conn.Close()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
 	}()
 
 	c.Conn.SetReadLimit(ReadLimit)
-	c.Conn.SetReadDeadline(time.Now().Add(PongWait))
+	_ = c.Conn.SetReadDeadline(time.Now().Add(PongWait))
 	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(PongWait))
+		_ = c.Conn.SetReadDeadline(time.Now().Add(PongWait))
 		return nil
 	})
 
@@ -72,15 +82,14 @@ func (c *Client) ReadPump() {
 			break
 		}
 
-		// Gateway does NOT interpret business logic — just enforces size (64KB already via SetReadLimit)
-		// and forwards raw bytes to the router/hub. Business validation (friendship, stanza_id, etc.) is in router layer.
-
-		// Deliver to hub's broadcast/router channel (non-blocking to avoid blocking readPump on slow router).
-		select {
-		case c.hub.Broadcast <- message:
-		default:
-			c.logger.Warn("gateway broadcast channel full, dropping message", zap.String("user", c.UserID))
+		// Gateway does NOT interpret business logic — just enforces size (64KB already via SetReadLimit).
+		// Business validation (friendship, stanza_id, etc.) is in router layer.
+		handler := c.hub.getInboundHandler()
+		if handler == nil {
+			c.logger.Debug("gateway inbound handler nil, dropping message", zap.String("user", c.UserID), zap.String("session", c.SessionID))
+			continue
 		}
+		handler.HandleInbound(c.UserID, c.SessionID, c.DeviceClass, message)
 	}
 }
 
@@ -90,22 +99,24 @@ func (c *Client) WritePump() {
 	ticker := time.NewTicker(PingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.Conn.Close()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(WriteWait))
+			_ = c.Conn.SetWriteDeadline(time.Now().Add(WriteWait))
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 			w, err := c.Conn.NextWriter(websocket.BinaryMessage)
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			_, _ = w.Write(message)
 
 			// Gate-0 fix: do NOT concatenate queued messages with '\n' separator —
 			// it corrupts binary Protobuf payloads. Each message is sent as its own
@@ -115,7 +126,7 @@ func (c *Client) WritePump() {
 			}
 
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(WriteWait))
+			_ = c.Conn.SetWriteDeadline(time.Now().Add(WriteWait))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
