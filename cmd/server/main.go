@@ -1,74 +1,77 @@
+// Command server boots the Stage-1 IM server: load config.toml, wire all
+// layers via internal/app, serve HTTP+WS with graceful shutdown.
 package main
 
 import (
+	"context"
+	"flag"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
+	"golang-im-neo-system/internal/app"
 	"golang-im-neo-system/internal/config"
-	"golang-im-neo-system/internal/logic/session"
-	"golang-im-neo-system/internal/store"
-	"golang-im-neo-system/pkg/logger"
 )
 
+func parseDurOr(s string, dflt time.Duration) time.Duration {
+	if s == "" {
+		return dflt
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return d
+	}
+	return dflt
+}
+
 func main() {
-	// Load configuration (config.toml SSOT)
-	cfg, err := config.Load("config.toml")
+	configPath := flag.String("config", "config.toml", "path to config.toml (SSOT)")
+	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
 
-	// Initialize structured logger (uber/zap)
-	zapLogger, err := logger.New(cfg.Server.Mode)
+	a, err := app.Build(cfg)
 	if err != nil {
-		log.Fatalf("init logger: %v", err)
-	}
-	defer zapLogger.Sync()
-
-	zapLogger.Info("starting Golang IM Neo System", zap.String("addr", cfg.Addr()))
-
-	// Initialize persistence with Gate-0 safety primitives:
-	// PRAGMA synchronous=FULL, WAL, single writer pool (store.NewDB)
-	db, err := cfg.OpenDB()
-	if err != nil {
-		zapLogger.Fatal("open db failed", zap.Error(err))
-	}
-	zapLogger.Info("database opened",
-		zap.String("path", cfg.Database.Path),
-		zap.Int("maxOpenConns", cfg.Database.MaxOpenConns),
-		zap.String("pragma", "WAL + synchronous=FULL"),
-	)
-
-	// Seed SuperAdmin (bcrypt hash, idempotent, Root vs Admin separation)
-	if err := config.SeedSuperAdmin(db, cfg); err != nil {
-		zapLogger.Fatal("seed superadmin failed", zap.Error(err))
-	}
-	zapLogger.Info("superadmin seeded", zap.String("username", cfg.Admin.Username))
-
-	// Initialize in-memory CovSeq Allocator with persistent watermark (Sync-DB-First)
-	allocator := session.NewAllocator(db)
-	if err := allocator.LoadAll(); err != nil {
-		zapLogger.Warn("allocator preload failed (non-fatal, lazy load will handle)", zap.Error(err))
-	} else {
-		zapLogger.Info("allocator preloaded")
+		log.Fatalf("build app: %v", err)
 	}
 
-	// Demonstrate allocation (Gate-0 verification)
-	_ = allocator
-	// Gate-0 fix: BatchWriter worker loop must be started, otherwise queued messages are never flushed.
-	batchWriter := store.NewBatchWriter(db, zapLogger)
-	batchWriter.Start()
-	_ = batchWriter
+	srv := &http.Server{
+		Addr:         cfg.Addr(),
+		Handler:      a.Engine,
+		ReadTimeout:  parseDurOr(cfg.Server.ReadTimeout, 30*time.Second),
+		WriteTimeout: parseDurOr(cfg.Server.WriteTimeout, 30*time.Second),
+	}
 
-	// Initialize gateway hub with backpressure breaker (select default)
-	// hub := gateway.NewHub(zapLogger)
-	// go hub.Run()
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
-	zapLogger.Info("Gate-0 initialization complete",
-		zap.String("module", "golang-im-neo-system"),
-		zap.Strings("gates", []string{"G0-1 stanza_id", "G0-2 cov+stanza unique", "G0-3 sync FULL", "G0-4 backpressure", "G0-5 Sync-DB-First + Nanopb"}),
-	)
+	go func() {
+		a.Logger.Info("starting Golang IM Neo System",
+			zap.String("addr", cfg.Addr()),
+			zap.String("mode", cfg.Server.Mode),
+			zap.String("db", cfg.Database.Path))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			a.Logger.Fatal("listen failed", zap.Error(err))
+		}
+	}()
 
-	// TODO: Stage-1 — gin, handshake, gateway run, router, etc.
-	select {}
+	<-quit
+	a.Logger.Info("shutdown signal received, draining...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		a.Logger.Error("http shutdown failed", zap.Error(err))
+	}
+	if err := a.Close(); err != nil {
+		a.Logger.Error("app close failed", zap.Error(err))
+	}
+	a.Logger.Info("server stopped cleanly")
 }
