@@ -16,6 +16,8 @@
 //	group-create/-list/-info/-members/-invite/-join/-leave/-dismiss/-kick/
 //	-role/-mute/-unmute/-history/-chat   Stage-4 group endpoints + WS fan-out
 //	signal-send/-listen   Stage-4 WebRTC signaling bypass frames over WS
+//	profile-get/-update   profile card endpoints (get public, put own)
+//	post-create/-delete/-card   user posts + public jump card
 package main
 
 import (
@@ -47,7 +49,7 @@ var (
 	fPass    = flag.String("pass", "", "password")
 	fDevice  = flag.String("device", "interactive", "device class (interactive|hardware)")
 	fDevName = flag.String("devname", "", "device name (defaults to <device>-cli)")
-	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast|group-create|group-list|group-info|group-members|group-invite|group-join|group-leave|group-dismiss|group-kick|group-role|group-mute|group-unmute|group-history|group-chat|signal-send|signal-listen")
+	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast|group-create|group-list|group-info|group-members|group-invite|group-join|group-leave|group-dismiss|group-kick|group-role|group-mute|group-unmute|group-history|group-chat|signal-send|signal-listen|profile-get|profile-update|post-create|post-delete|post-card")
 	fMsg     = flag.String("msg", "", "chat text (chat action) or broadcast content (admin-broadcast)")
 	fTo      = flag.String("to", "", "recipient user_id for PRIVATE_CHAT (chat action)")
 	fListen  = flag.Duration("listen", 5*time.Second, "keep-reading window after sends (chat action)")
@@ -62,6 +64,14 @@ var (
 	// Stage-4 flags.
 	fGroup = flag.String("group", "", "group id for group-* actions")
 	fLimit = flag.Int("limit", 50, "history page size for group-history")
+	// Profile/posts flags.
+	fNickname  = flag.String("nickname", "", "new nickname for profile-update")
+	fSignature = flag.String("signature", "", "new signature for profile-update")
+	fAvatar    = flag.String("avatar", "", "new avatar URL for profile-update (sent as avatar_url)")
+	fPostType  = flag.String("posttype", "text", "media type for post-create (text|image|video|bilibili)")
+	fMediaURL  = flag.String("mediaurl", "", "media_url for post-create (image|video)")
+	fBVID      = flag.String("bvid", "", "bilibili_bvid for post-create (bilibili)")
+	fPreview   = flag.String("preview", "", "raw JSON object for link_preview in post-create")
 )
 
 const ackTimeout = 5 * time.Second
@@ -1021,6 +1031,114 @@ func actSignalListen() {
 	fmt.Println("done")
 }
 
+// ---------- profile/posts actions ----------
+
+func actProfileGet() {
+	if *fTarget == "" {
+		fatalf("profile-get needs -target <username>")
+	}
+	data, err := getJSON(*fServer, "/api/v1/profile/"+url.PathEscape(*fTarget), "")
+	if err != nil {
+		fatalf("profile-get: %v", err)
+	}
+	fmt.Printf("profile: %s\n", short(data))
+}
+
+func actProfileUpdate() {
+	sess := ensureLogin()
+	body := map[string]interface{}{}
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "nickname":
+			body["nickname"] = *fNickname
+		case "signature":
+			body["signature"] = *fSignature
+		case "avatar":
+			body["avatar_url"] = *fAvatar
+		}
+	})
+	if len(body) == 0 {
+		fatalf("profile-update needs at least one of -nickname -signature -avatar")
+	}
+	data, err := doJSON(http.MethodPut, sess.Server, "/api/v1/profile", body, sess.AccessToken)
+	if err != nil {
+		fatalf("profile-update: %v", err)
+	}
+	fmt.Printf("profile updated %s\n", short(data))
+}
+
+func actPostCreate() {
+	sess := ensureLogin()
+	switch *fPostType {
+	case "text", "image", "video", "bilibili":
+	default:
+		fatalf("post-create: -posttype must be text|image|video|bilibili")
+	}
+	body := map[string]interface{}{
+		"media_type": *fPostType,
+		"content":    *fMsg,
+	}
+	if *fMediaURL != "" {
+		body["media_url"] = *fMediaURL
+	}
+	if *fBVID != "" {
+		body["bilibili_bvid"] = *fBVID
+	}
+	if *fPreview != "" {
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(*fPreview), &obj); err != nil || obj == nil {
+			fatalf("post-create: -preview must be a JSON object: %v", err)
+		}
+		body["link_preview"] = obj
+	}
+	data, err := postJSON(sess.Server, "/api/v1/profile/posts", body, sess.AccessToken)
+	if err != nil {
+		fatalf("post-create: %v", err)
+	}
+	var out struct {
+		Post struct {
+			ID        uint   `json:"id"`
+			MediaType string `json:"media_type"`
+		} `json:"post"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.Post.ID == 0 {
+		fatalf("post-create: bad response %s", short(data))
+	}
+	fmt.Printf("post created id=%d media_type=%s\n", out.Post.ID, out.Post.MediaType)
+}
+
+func actPostDelete() {
+	sess := ensureLogin()
+	if *fTarget == "" {
+		fatalf("post-delete needs -target <post_id>")
+	}
+	data, err := deleteJSON(sess.Server, "/api/v1/profile/posts/"+url.PathEscape(*fTarget), sess.AccessToken)
+	if err != nil {
+		fatalf("post-delete: %v", err)
+	}
+	fmt.Printf("delete ok %s\n", short(data))
+}
+
+func actPostCard() {
+	if *fTarget == "" {
+		fatalf("post-card needs -target <post_id>")
+	}
+	data, err := getJSON(*fServer, "/api/v1/posts/"+url.PathEscape(*fTarget)+"/card", "")
+	if err != nil {
+		fatalf("post-card: %v", err)
+	}
+	var out struct {
+		LinkPreview *struct {
+			TargetURL string `json:"target_url"`
+		} `json:"link_preview"`
+	}
+	target := ""
+	if err := json.Unmarshal(data, &out); err == nil && out.LinkPreview != nil {
+		target = out.LinkPreview.TargetURL
+	}
+	fmt.Printf("card: %s\ntarget_url=%s\n", short(data), target)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `imcli — Stage-1+2+4 verification client
 Usage: imcli -action <name> [flags]
@@ -1031,6 +1149,7 @@ Usage: imcli -action <name> [flags]
            group-join | group-leave | group-dismiss | group-kick | group-role
            group-mute | group-unmute | group-history | group-chat
            signal-send | signal-listen
+           profile-get | profile-update | post-create | post-delete | post-card
   flags: -server (default http://127.0.0.1:8080) -user -pass
          -device (default interactive) -devname -msg -to -listen (default 5s)
          -target (friend-apply username; friend-respond/friend-delete user_id; admin-ban user_id;
@@ -1042,6 +1161,11 @@ Usage: imcli -action <name> [flags]
                   group-chat text; signal-send payload)
          -group (group id for group-* actions) -limit (group-history page size, default 50)
          -to (signal-send peer user_id) -listen (group-chat/signal-send/signal-listen window)
+         -target (profile-get username; post-delete/post-card post_id)
+         -nickname -signature -avatar (profile-update: only explicitly-set flags are sent)
+         -posttype (post-create media type text|image|video|bilibili, default text)
+         -msg (post-create content) -mediaurl (post-create media_url)
+         -bvid (post-create bilibili_bvid) -preview (post-create link_preview raw JSON object)
   note: friend/media/group actions reuse the login session cache; admin actions need
         an admin login (e.g. -user superadmin).
 `)
@@ -1123,6 +1247,16 @@ func main() {
 		actSignalSend()
 	case "signal-listen":
 		actSignalListen()
+	case "profile-get":
+		actProfileGet()
+	case "profile-update":
+		actProfileUpdate()
+	case "post-create":
+		actPostCreate()
+	case "post-delete":
+		actPostDelete()
+	case "post-card":
+		actPostCard()
 	default:
 		usage()
 		fatalf("unknown action %q", *fAction)
