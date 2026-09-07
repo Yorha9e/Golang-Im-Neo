@@ -117,6 +117,10 @@ func Build(cfg *config.Config) (*App, error) {
 	admin.RegisterRoutes(engine.Group("/api/v1/admin"), adminSvc, jwtMW, adminMW)
 	engine.GET("/ws", hs.ServeWS)
 
+	// Built-in Web Console
+	engine.StaticFile("/", "./web/index.html")
+	engine.Static("/web", "./web")
+
 	zapLogger.Info("app wired",
 		zap.String("addr", cfg.Addr()),
 		zap.String("db", cfg.Database.Path))

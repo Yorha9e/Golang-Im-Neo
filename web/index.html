@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golang IM Neo System - Web Console</title>
+    <style>
+        :root {
+            --bg-main: #0f172a;
+            --bg-sidebar: #1e293b;
+            --bg-card: #334155;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #475569;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        /* 登录/注册浮层 */
+        #auth-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+
+        .auth-card {
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px;
+            width: 360px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+
+        .auth-card h2 {
+            margin-bottom: 20px;
+            text-align: center;
+            color: var(--text-main);
+            font-size: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-main);
+            outline: none;
+            font-size: 14px;
+        }
+
+        .form-group input:focus {
+            border-color: var(--primary);
+        }
+
+        .auth-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 10px 16px;
+            border-radius: 6px;
+            border: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            flex: 1;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-main);
+            flex: 1;
+        }
+
+        .btn-secondary:hover {
+            background: #475569;
+        }
+
+        /* 主界面 */
+        #app-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 侧边栏 */
+        #sidebar {
+            width: 300px;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-profile-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+            color: white;
+            object-fit: cover;
+            cursor: pointer;
+        }
+
+        .user-info {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .user-status-tag {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+
+        .session-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .session-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .session-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            font-weight: 600;
+        }
+
+        .contact-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: background 0.15s;
+        }
+
+        .contact-item:hover {
+            background: var(--bg-card);
+        }
+
+        .contact-item.active {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .contact-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #64748b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: white;
+        }
+
+        .contact-details {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .contact-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .contact-sub {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 好友操作区 */
+        .friend-actions-bar {
+            padding: 12px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+
+        .friend-actions-bar input {
+            flex: 1;
+            padding: 8px 10px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: white;
+            font-size: 13px;
+        }
+
+        /* 聊天主窗口 */
+        #chat-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-main);
+        }
+
+        .chat-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-sidebar);
+        }
+
+        .chat-target-info h3 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .chat-target-info span {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .messages-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .msg-row {
+            display: flex;
+            gap: 10px;
+            max-width: 70%;
+        }
+
+        .msg-row.outgoing {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .msg-row.incoming {
+            align-self: flex-start;
+        }
+
+        .msg-bubble {
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            word-break: break-word;
+            position: relative;
+        }
+
+        .msg-row.outgoing .msg-bubble {
+            background: var(--primary);
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        .msg-row.incoming .msg-bubble {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border-bottom-left-radius: 2px;
+        }
+
+        .msg-status-tag {
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 4px;
+            text-align: right;
+        }
+
+        .msg-image {
+            max-width: 260px;
+            max-height: 260px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 4px;
+        }
+
+        /* 底部输入框 */
+        .chat-input-bar {
+            padding: 16px 24px;
+            background: var(--bg-sidebar);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .chat-input-bar input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: white;
+            outline: none;
+            font-size: 14px;
+        }
+
+        .chat-input-bar input[type="text"]:focus {
+            border-color: var(--primary);
+        }
+
+        #media-file-input, #avatar-file-input {
+            display: none;
+        }
+
+        .icon-btn {
+            background: var(--bg-card);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            width: 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+        }
+
+        .icon-btn:hover {
+            color: var(--text-main);
+            border-color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 登录/注册 Modal -->
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <h2 id="auth-title">登录 Golang IM</h2>
+            <div class="form-group">
+                <label>用户名 (Username)</label>
+                <input type="text" id="auth-username" placeholder="输入用户名" value="alice">
+            </div>
+            <div class="form-group">
+                <label>密码 (Password, 至少8位)</label>
+                <input type="password" id="auth-password" placeholder="输入密码" value="password123">
+            </div>
+            <div class="auth-actions">
+                <button class="btn-primary" id="btn-login" onclick="handleLogin()">登录</button>
+                <button class="btn-secondary" id="btn-register" onclick="handleRegister()">注册</button>
+            </div>
+            <div id="auth-error" style="color: var(--danger); font-size: 12px; margin-top: 12px; text-align: center;"></div>
+        </div>
+    </div>
+
+    <!-- IM 主工作台 -->
+    <div id="app-container">
+        <!-- 侧边栏 -->
+        <div id="sidebar">
+            <div class="user-profile-header">
+                <img id="my-avatar" class="avatar" src="" onclick="triggerAvatarUpload()" title="点击更换头像" style="display:none;">
+                <div id="my-avatar-fallback" class="avatar" onclick="triggerAvatarUpload()" title="点击更换头像">U</div>
+                <div class="user-info">
+                    <div class="user-name" id="my-username">未登录</div>
+                    <div class="user-status-tag"><div id="status-dot" class="status-dot"></div> <span id="conn-status">长连接未连接</span></div>
+                </div>
+            </div>
+
+            <div class="session-tabs">
+                <div class="session-tab active" id="tab-hall" onclick="switchTab('hall')">公共大厅</div>
+                <div class="session-tab" id="tab-friends" onclick="switchTab('friends')">好友 (<span id="friend-count">0</span>)</div>
+                <div class="session-tab" id="tab-pending" onclick="switchTab('pending')">申请 (<span id="pending-count">0</span>)</div>
+            </div>
+
+            <!-- 会话列表 -->
+            <div class="contact-list" id="contact-list-container">
+                <!-- 动态渲染 -->
+            </div>
+
+            <!-- 好友添加栏 -->
+            <div class="friend-actions-bar">
+                <input type="text" id="target-friend-username" placeholder="输入用户名添加好友">
+                <button class="btn-primary" onclick="applyFriend()" style="padding: 8px 12px;">申请</button>
+            </div>
+        </div>
+
+        <!-- 聊天区域 -->
+        <div id="chat-main">
+            <div class="chat-header">
+                <div class="chat-target-info">
+                    <h3 id="current-chat-title">公共大厅 (Public Hall)</h3>
+                    <span id="current-chat-sub">全服广播通道</span>
+                </div>
+                <div>
+                    <button class="btn-secondary" style="font-size:12px; padding:6px 12px;" onclick="handleLogout()">退出登录</button>
+                </div>
+            </div>
+
+            <!-- 消息滚屏区 -->
+            <div class="messages-scroll" id="messages-scroll">
+                <!-- 动态消息 -->
+            </div>
+
+            <!-- 底部工具栏 -->
+            <div class="chat-input-bar">
+                <button class="icon-btn" onclick="triggerMediaUpload()" title="发送图片/文件">📷</button>
+                <input type="text" id="chat-msg-input" placeholder="输入消息内容..." onkeydown="handleKeyDown(event)">
+                <button class="btn-primary" onclick="sendMessage()" style="padding: 12px 20px;">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 隐藏上传表单 -->
+    <input type="file" id="media-file-input" accept="image/*" onchange="uploadMediaFile(event)">
+    <input type="file" id="avatar-file-input" accept="image/*" onchange="uploadAvatarFile(event)">
+
+    <script>
+        // 纯原生 JavaScript 实现轻量 Protobuf 编解码器 (零外部依赖，100% 离线可靠)
+        const MsgType = {
+            UNKNOWN: 0,
+            HEARTBEAT_PING: 1,
+            HEARTBEAT_PONG: 2,
+            CHAT: 3,
+            PRIVATE_CHAT: 4,
+            SYSTEM_NOTICE: 5,
+            ACK: 6,
+            FRIEND_APPLY_NOTIFY: 10,
+            FRIEND_ACCEPT_NOTIFY: 11,
+            SIGNALING_OFFER: 20,
+            SIGNALING_ANSWER: 21,
+            SIGNALING_CANDIDATE: 22,
+            GROUP_CHAT: 30
+        };
+
+        function encodeWsMessage(msg) {
+            const buf = [];
+            const enc = new TextEncoder();
+            function writeVarint(val) {
+                let v = Number(val || 0);
+                while (v > 127) {
+                    buf.push((v & 127) | 128);
+                    v >>>= 7;
+                }
+                buf.push(v & 127);
+            }
+            function writeField(tag, wire, fn) {
+                writeVarint((tag << 3) | wire);
+                fn();
+            }
+            if (msg.type) writeField(1, 0, () => writeVarint(msg.type));
+            if (msg.seq) writeField(2, 0, () => writeVarint(msg.seq));
+            if (msg.from_uid) {
+                const b = enc.encode(msg.from_uid);
+                writeField(3, 2, () => { writeVarint(b.length); for (let i=0; i<b.length; i++) buf.push(b[i]); });
+            }
+            if (msg.to_uid) {
+                const b = enc.encode(msg.to_uid);
+                writeField(4, 2, () => { writeVarint(b.length); for (let i=0; i<b.length; i++) buf.push(b[i]); });
+            }
+            if (msg.content) {
+                const b = enc.encode(msg.content);
+                writeField(5, 2, () => { writeVarint(b.length); for (let i=0; i<b.length; i++) buf.push(b[i]); });
+            }
+            if (msg.timestamp) writeField(6, 0, () => writeVarint(msg.timestamp));
+            if (msg.payload && msg.payload.length) {
+                writeField(7, 2, () => { writeVarint(msg.payload.length); for (let i=0; i<msg.payload.length; i++) buf.push(msg.payload[i]); });
+            }
+            if (msg.extra) {
+                const b = enc.encode(msg.extra);
+                writeField(8, 2, () => { writeVarint(b.length); for (let i=0; i<b.length; i++) buf.push(b[i]); });
+            }
+            if (msg.stanza_id) {
+                const b = enc.encode(msg.stanza_id);
+                writeField(9, 2, () => { writeVarint(b.length); for (let i=0; i<b.length; i++) buf.push(b[i]); });
+            }
+            return new Uint8Array(buf);
+        }
+
+        function decodeWsMessage(u8) {
+            let pos = 0;
+            const len = u8.length;
+            const msg = { type: 0, seq: 0, from_uid: '', to_uid: '', content: '', timestamp: 0, payload: null, extra: '', stanza_id: '' };
+            const dec = new TextDecoder();
+            while (pos < len) {
+                let tagVal = 0, shift = 0;
+                while (pos < len) {
+                    const b = u8[pos++];
+                    tagVal |= (b & 0x7F) << shift;
+                    if ((b & 0x80) === 0) break;
+                    shift += 7;
+                }
+                const tag = tagVal >>> 3;
+                const wire = tagVal & 0x7;
+                if (wire === 0) {
+                    let val = 0, s = 0;
+                    while (pos < len) {
+                        const b = u8[pos++];
+                        val |= (b & 0x7F) << s;
+                        if ((b & 0x80) === 0) break;
+                        s += 7;
+                    }
+                    if (tag === 1) msg.type = val;
+                    else if (tag === 2) msg.seq = val;
+                    else if (tag === 6) msg.timestamp = val;
+                } else if (wire === 2) {
+                    let strLen = 0, s = 0;
+                    while (pos < len) {
+                        const b = u8[pos++];
+                        strLen |= (b & 0x7F) << s;
+                        if ((b & 0x80) === 0) break;
+                        s += 7;
+                    }
+                    const bytes = u8.subarray(pos, pos + strLen);
+                    pos += strLen;
+                    if (tag === 3) msg.from_uid = dec.decode(bytes);
+                    else if (tag === 4) msg.to_uid = dec.decode(bytes);
+                    else if (tag === 5) msg.content = dec.decode(bytes);
+                    else if (tag === 7) msg.payload = bytes;
+                    else if (tag === 8) msg.extra = dec.decode(bytes);
+                    else if (tag === 9) msg.stanza_id = dec.decode(bytes);
+                } else {
+                    break;
+                }
+            }
+            return msg;
+        }
+
+        // 全局状态
+        let currentUser = null;
+        let currentToken = null;
+        let wsConn = null;
+        let activeChat = { type: 'hall', targetUID: '', targetName: '公共大厅' };
+        let friendsList = [];
+        let pendingList = [];
+        let messagesStore = { 'hall': [] };
+        let pingInterval = null;
+
+        function generateUUID() {
+            return 'stz_' + Math.random().toString(36).substring(2, 11) + Date.now();
+        }
+
+        function getCovID(uid1, uid2) {
+            return uid1 < uid2 ? `cov:${uid1}:${uid2}` : `cov:${uid2}:${uid1}`;
+        }
+
+        // 登录处理
+        async function handleLogin() {
+            const username = document.getElementById('auth-username').value.trim();
+            const password = document.getElementById('auth-password').value.trim();
+            const errDiv = document.getElementById('auth-error');
+            errDiv.innerText = '';
+
+            try {
+                const res = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, device_class: 'interactive', device_name: 'Web Browser' })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    currentUser = {
+                        userID: data.data.user_id,
+                        username: data.data.username,
+                        sessionID: data.data.session_id,
+                        role: data.data.role
+                    };
+                    currentToken = data.data.access_token;
+                    document.getElementById('auth-overlay').style.display = 'none';
+                    initDashboard();
+                } else {
+                    errDiv.innerText = data.msg || '登录失败';
+                }
+            } catch (err) {
+                errDiv.innerText = '网络连接失败: ' + err.message;
+            }
+        }
+
+        // 注册处理
+        async function handleRegister() {
+            const username = document.getElementById('auth-username').value.trim();
+            const password = document.getElementById('auth-password').value.trim();
+            const errDiv = document.getElementById('auth-error');
+            errDiv.innerText = '';
+
+            if (password.length < 8) {
+                errDiv.innerText = '密码长度不能少于 8 位';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/v1/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    alert('注册成功，请点击登录！');
+                } else {
+                    errDiv.innerText = data.msg || '注册失败';
+                }
+            } catch (err) {
+                errDiv.innerText = '网络连接失败: ' + err.message;
+            }
+        }
+
+        function handleLogout() {
+            if (wsConn) wsConn.close();
+            localStorage.clear();
+            location.reload();
+        }
+
+        // 登入后初始化
+        async function initDashboard() {
+            document.getElementById('my-username').innerText = currentUser.username;
+            document.getElementById('my-avatar-fallback').innerText = currentUser.username.charAt(0).toUpperCase();
+
+            // 连接 WebSocket
+            await connectWebSocket();
+
+            // 加载好友与待处理申请
+            loadFriends();
+        }
+
+        async function connectWebSocket() {
+            const statusEl = document.getElementById('conn-status');
+            const dotEl = document.getElementById('status-dot');
+
+            try {
+                statusEl.innerText = '获取握手凭证...';
+                const res = await fetch('/api/v1/auth/ticket', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                const data = await res.json();
+                if (data.code !== 0) {
+                    statusEl.innerText = '凭证获取失败';
+                    dotEl.style.background = 'var(--danger)';
+                    alert('获取握手 Ticket 失败: ' + data.msg);
+                    return;
+                }
+
+                const ticket = data.data.ticket;
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${location.host}/ws?ticket=${ticket}`;
+
+                statusEl.innerText = '正在建立连接...';
+                wsConn = new WebSocket(wsUrl);
+                wsConn.binaryType = 'arraybuffer';
+
+                wsConn.onopen = () => {
+                    statusEl.innerText = '长连接已就绪 (在线)';
+                    statusEl.style.color = 'var(--success)';
+                    dotEl.style.background = 'var(--success)';
+                    startHeartbeat();
+                };
+
+                wsConn.onmessage = (event) => {
+                    handleWsMessage(event.data);
+                };
+
+                wsConn.onclose = () => {
+                    statusEl.innerText = '已断开连接';
+                    statusEl.style.color = 'var(--danger)';
+                    dotEl.style.background = 'var(--danger)';
+                    clearInterval(pingInterval);
+                };
+
+                wsConn.onerror = (err) => {
+                    console.error('WS Error:', err);
+                    statusEl.innerText = '连接异常';
+                    dotEl.style.background = 'var(--danger)';
+                };
+            } catch (err) {
+                console.error('WS Connect error:', err);
+                statusEl.innerText = '网络连接失败';
+                dotEl.style.background = 'var(--danger)';
+            }
+        }
+
+        function startHeartbeat() {
+            clearInterval(pingInterval);
+            pingInterval = setInterval(() => {
+                if (wsConn && wsConn.readyState === WebSocket.OPEN) {
+                    const pingBytes = encodeWsMessage({
+                        type: MsgType.HEARTBEAT_PING,
+                        stanza_id: generateUUID(),
+                        timestamp: Date.now()
+                    });
+                    wsConn.send(pingBytes);
+                }
+            }, 30000);
+        }
+
+        // 处理下行 WS 消息
+        function handleWsMessage(arrayBuffer) {
+            try {
+                const uint8 = new Uint8Array(arrayBuffer);
+                const msg = decodeWsMessage(uint8);
+
+                switch (msg.type) {
+                    case MsgType.HEARTBEAT_PONG:
+                        break;
+
+                    case MsgType.ACK:
+                        markMessageAcked(msg.stanza_id, msg.seq);
+                        break;
+
+                    case MsgType.CHAT:
+                        appendMessage('hall', {
+                            fromUID: msg.from_uid,
+                            content: msg.content,
+                            extra: msg.extra,
+                            timestamp: msg.timestamp,
+                            isOutgoing: msg.from_uid === currentUser.userID,
+                            status: '已送达',
+                            stanzaID: msg.stanza_id
+                        });
+                        break;
+
+                    case MsgType.PRIVATE_CHAT:
+                        const peerUID = msg.from_uid === currentUser.userID ? msg.to_uid : msg.from_uid;
+                        const covID = getCovID(currentUser.userID, peerUID);
+                        appendMessage(covID, {
+                            fromUID: msg.from_uid,
+                            content: msg.content,
+                            extra: msg.extra,
+                            timestamp: msg.timestamp,
+                            isOutgoing: msg.from_uid === currentUser.userID,
+                            status: '已送达',
+                            stanzaID: msg.stanza_id
+                        });
+                        break;
+
+                    case MsgType.SYSTEM_NOTICE:
+                        alert(`【系统公告】\n${msg.content}`);
+                        break;
+
+                    case MsgType.FRIEND_APPLY_NOTIFY:
+                        alert(`收到来自 ${msg.from_uid} 的好友申请！`);
+                        loadFriends();
+                        break;
+
+                    case MsgType.FRIEND_ACCEPT_NOTIFY:
+                        alert(`${msg.from_uid} 通过了你的好友申请！`);
+                        loadFriends();
+                        break;
+                }
+            } catch (err) {
+                console.error('Decode Protobuf failed:', err);
+            }
+        }
+
+        function appendMessage(covKey, msgObj) {
+            if (!messagesStore[covKey]) {
+                messagesStore[covKey] = [];
+            }
+
+            const exists = messagesStore[covKey].some(m => m.stanzaID === msgObj.stanzaID && msgObj.stanzaID !== '');
+            if (!exists) {
+                messagesStore[covKey].push(msgObj);
+            }
+
+            const currentCovKey = activeChat.type === 'hall' ? 'hall' : getCovID(currentUser.userID, activeChat.targetUID);
+            if (currentCovKey === covKey) {
+                renderMessages();
+            }
+        }
+
+        function markMessageAcked(stanzaID, seq) {
+            for (let k in messagesStore) {
+                messagesStore[k].forEach(m => {
+                    if (m.stanzaID === stanzaID) {
+                        m.status = `已送达 (seq: ${seq})`;
+                    }
+                });
+            }
+            renderMessages();
+        }
+
+        // 发送消息
+        function sendMessage() {
+            const input = document.getElementById('chat-msg-input');
+            const content = input.value.trim();
+            if (!content || !wsConn || wsConn.readyState !== WebSocket.OPEN) return;
+
+            const stanzaID = generateUUID();
+            const isHall = activeChat.type === 'hall';
+            const msgType = isHall ? MsgType.CHAT : MsgType.PRIVATE_CHAT;
+
+            const payload = {
+                type: msgType,
+                to_uid: isHall ? '' : activeChat.targetUID,
+                content: content,
+                stanza_id: stanzaID,
+                timestamp: Date.now()
+            };
+
+            const covKey = isHall ? 'hall' : getCovID(currentUser.userID, activeChat.targetUID);
+            appendMessage(covKey, {
+                fromUID: currentUser.userID,
+                content: content,
+                timestamp: Date.now(),
+                isOutgoing: true,
+                status: '发送中...',
+                stanzaID: stanzaID
+            });
+
+            const encoded = encodeWsMessage(payload);
+            wsConn.send(encoded);
+
+            input.value = '';
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+
+        // 渲染消息流
+        function renderMessages() {
+            const scroll = document.getElementById('messages-scroll');
+            const covKey = activeChat.type === 'hall' ? 'hall' : getCovID(currentUser.userID, activeChat.targetUID);
+            const list = messagesStore[covKey] || [];
+
+            scroll.innerHTML = '';
+            list.forEach(m => {
+                const row = document.createElement('div');
+                row.className = `msg-row ${m.isOutgoing ? 'outgoing' : 'incoming'}`;
+
+                let mediaHtml = '';
+                if (m.extra) {
+                    try {
+                        const meta = JSON.parse(m.extra);
+                        if (meta.url) {
+                            mediaHtml = `<br><img class="msg-image" src="${meta.url}" onclick="window.open('${meta.url}')">`;
+                        }
+                    } catch (e) {}
+                }
+
+                row.innerHTML = `
+                    <div class="msg-bubble">
+                        <div>${escapeHtml(m.content)}</div>
+                        ${mediaHtml}
+                        <div class="msg-status-tag">${m.status || ''}</div>
+                    </div>
+                `;
+                scroll.appendChild(row);
+            });
+
+            scroll.scrollTop = scroll.scrollHeight;
+        }
+
+        function escapeHtml(str) {
+            return (str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        // 加载好友与待处理
+        async function loadFriends() {
+            try {
+                const res = await fetch('/api/v1/friends', {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    friendsList = data.data.friends || [];
+                    pendingList = data.data.pending || [];
+                    document.getElementById('friend-count').innerText = friendsList.length;
+                    document.getElementById('pending-count').innerText = pendingList.length;
+                    renderSidebarList();
+                }
+            } catch (err) {
+                console.error('Load friends error:', err);
+            }
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.session-tab').forEach(el => el.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            renderSidebarList(tab);
+        }
+
+        function renderSidebarList(currentTab) {
+            const container = document.getElementById('contact-list-container');
+            container.innerHTML = '';
+
+            const activeTabEl = document.querySelector('.session-tab.active');
+            const tab = currentTab || (activeTabEl ? activeTabEl.id.replace('tab-', '') : 'hall');
+
+            if (tab === 'hall') {
+                container.innerHTML = `
+                    <div class="contact-item ${activeChat.type === 'hall' ? 'active' : ''}" onclick="selectChat('hall', '', '公共大厅')">
+                        <div class="contact-avatar" style="background:var(--primary);">📢</div>
+                        <div class="contact-details">
+                            <div class="contact-name">公共大厅</div>
+                            <div class="contact-sub">全服公共广播频道</div>
+                        </div>
+                    </div>
+                `;
+            } else if (tab === 'friends') {
+                if (friendsList.length === 0) {
+                    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">暂无好友</div>';
+                    return;
+                }
+                friendsList.forEach(f => {
+                    const item = document.createElement('div');
+                    item.className = `contact-item ${activeChat.targetUID === f.friend_id ? 'active' : ''}`;
+                    item.onclick = () => selectChat('private', f.friend_id, f.friend_name || f.friend_id);
+                    item.innerHTML = `
+                        <div class="contact-avatar">${(f.friend_name || 'U').charAt(0).toUpperCase()}</div>
+                        <div class="contact-details">
+                            <div class="contact-name">${escapeHtml(f.friend_name || f.friend_id)}</div>
+                            <div class="contact-sub">${f.remark ? `备注: ${escapeHtml(f.remark)}` : '双向好友'}</div>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            } else if (tab === 'pending') {
+                if (pendingList.length === 0) {
+                    container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">暂无待处理申请</div>';
+                    return;
+                }
+                pendingList.forEach(p => {
+                    const item = document.createElement('div');
+                    item.className = 'contact-item';
+                    item.innerHTML = `
+                        <div class="contact-avatar">👤</div>
+                        <div class="contact-details">
+                            <div class="contact-name">${escapeHtml(p.user_name || p.user_id)}</div>
+                            <div class="contact-sub">${escapeHtml(p.remark || '申请添加你为好友')}</div>
+                        </div>
+                        <button class="btn-primary" style="padding:4px 8px;font-size:11px;" onclick="respondFriend('${p.user_id}', 'accept')">同意</button>
+                        <button class="btn-secondary" style="padding:4px 8px;font-size:11px;margin-left:4px;" onclick="respondFriend('${p.user_id}', 'reject')">拒绝</button>
+                    `;
+                    container.appendChild(item);
+                });
+            }
+        }
+
+        function selectChat(type, targetUID, targetName) {
+            activeChat = { type, targetUID, targetName };
+            document.getElementById('current-chat-title').innerText = targetName;
+            document.getElementById('current-chat-sub').innerText = type === 'hall' ? '全服广播通道' : `私聊目标: ${targetUID}`;
+            renderSidebarList();
+            renderMessages();
+        }
+
+        // 申请好友
+        async function applyFriend() {
+            const input = document.getElementById('target-friend-username');
+            const target = input.value.trim();
+            if (!target) return;
+
+            try {
+                const res = await fetch('/api/v1/friends/apply', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: JSON.stringify({ target_username: target, remark: `我是 ${currentUser.username}` })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    alert('好友申请已发送！');
+                    input.value = '';
+                } else {
+                    alert('申请失败: ' + data.msg);
+                }
+            } catch (err) {
+                alert('网络错误: ' + err.message);
+            }
+        }
+
+        // 同意/拒绝好友
+        async function respondFriend(targetUserID, action) {
+            try {
+                const res = await fetch('/api/v1/friends/respond', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: JSON.stringify({ target_user_id: targetUserID, action })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    alert(action === 'accept' ? '已同意好友申请！' : '已拒绝申请');
+                    loadFriends();
+                } else {
+                    alert('操作失败: ' + data.msg);
+                }
+            } catch (err) {
+                alert('网络错误: ' + err.message);
+            }
+        }
+
+        // 多媒体上传
+        function triggerMediaUpload() {
+            document.getElementById('media-file-input').click();
+        }
+
+        async function uploadMediaFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('type', 'image');
+            formData.append('access_level', activeChat.type === 'hall' ? 'public' : 'private');
+
+            try {
+                const res = await fetch('/api/v1/media/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` },
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    sendMediaMessage(data.data.mid, data.data.url, file.name);
+                } else {
+                    alert('上传失败: ' + data.msg);
+                }
+            } catch (err) {
+                alert('上传错误: ' + err.message);
+            }
+            e.target.value = '';
+        }
+
+        function sendMediaMessage(mid, url, filename) {
+            const stanzaID = generateUUID();
+            const isHall = activeChat.type === 'hall';
+            const extra = JSON.stringify({ mid, url, filename });
+
+            const payload = {
+                type: isHall ? MsgType.CHAT : MsgType.PRIVATE_CHAT,
+                to_uid: isHall ? '' : activeChat.targetUID,
+                content: `[图片: ${filename}]`,
+                extra: extra,
+                stanza_id: stanzaID,
+                timestamp: Date.now()
+            };
+
+            const covKey = isHall ? 'hall' : getCovID(currentUser.userID, activeChat.targetUID);
+            appendMessage(covKey, {
+                fromUID: currentUser.userID,
+                content: `[图片: ${filename}]`,
+                extra: extra,
+                timestamp: Date.now(),
+                isOutgoing: true,
+                status: '发送中...',
+                stanzaID: stanzaID
+            });
+
+            const encoded = encodeWsMessage(payload);
+            wsConn.send(encoded);
+        }
+
+        // 头像上传
+        function triggerAvatarUpload() {
+            document.getElementById('avatar-file-input').click();
+        }
+
+        async function uploadAvatarFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('type', 'avatar');
+            formData.append('access_level', 'public');
+
+            try {
+                const res = await fetch('/api/v1/media/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` },
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    alert('头像上传成功！');
+                    const img = document.getElementById('my-avatar');
+                    img.src = data.data.url;
+                    img.style.display = 'block';
+                    document.getElementById('my-avatar-fallback').style.display = 'none';
+                } else {
+                    alert('头像上传失败: ' + data.msg);
+                }
+            } catch (err) {
+                alert('网络错误: ' + err.message);
+            }
+            e.target.value = '';
+        }
+    </script>
+</body>
+</html>
