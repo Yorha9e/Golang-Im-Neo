@@ -1,0 +1,9 @@
+// Nanopb physical fixed-size contract — Zero-malloc, stack-only decode on ESP32-C3 (400KB SRAM).
+// All variable-length fields are capped to eliminate pb_callback_t and malloc.
+// Gate-0-5:彻底 Zero-malloc.
+proto.WsMessage.from_uid     max_size:36
+proto.WsMessage.to_uid       max_size:36
+proto.WsMessage.content      max_size:512
+proto.WsMessage.payload      max_size:256
+proto.WsMessage.extra        max_size:128
+proto.WsMessage.stanza_id    max_size:64

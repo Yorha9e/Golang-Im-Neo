@@ -1,0 +1,35 @@
+syntax = "proto3";
+package proto;
+option go_package = "./proto";
+
+// MsgType enumerates all WebSocket message types.
+// Gate-0 SSOT: MUST include HEARTBEAT, CHAT, PRIVATE, SYSTEM, ACK, FRIEND, SIGNALING, GROUP.
+enum MsgType {
+  UNKNOWN = 0;
+  HEARTBEAT_PING = 1;          // Client heartbeat
+  HEARTBEAT_PONG = 2;          // Server heartbeat reply
+  CHAT = 3;                    // Public hall broadcast
+  PRIVATE_CHAT = 4;            // Private 1-1 chat
+  SYSTEM_NOTICE = 5;           // System global broadcast / notice
+  ACK = 6;                     // Message confirmation (stanza_id + seq)
+  FRIEND_APPLY_NOTIFY = 10;    // Friend apply notification
+  FRIEND_ACCEPT_NOTIFY = 11;   // Friend accept notification
+  SIGNALING_OFFER = 20;        // WebRTC SD Offer (P2P signaling)
+  SIGNALING_ANSWER = 21;       // WebRTC SD Answer
+  SIGNALING_CANDIDATE = 22;    // ICE Candidate
+  GROUP_CHAT = 30;             // Group chat
+}
+
+// WsMessage is the unified envelope for real-time and historical messages.
+// Real-time WS frames and history pull use identical structure (同构同解析).
+message WsMessage {
+  MsgType type = 1;
+  int64 seq = 2;               // Monotonic per-conversation seq (server-assigned, client sends 0)
+  string from_uid = 3;         // Sender UserID (gateway forcibly overwrites)
+  string to_uid = 4;           // Receiver UserID / GroupID
+  string content = 5;          // Text content (UTF-8, no trailing \n)
+  int64 timestamp = 6;         // Server physical timestamp (ms)
+  bytes payload = 7;           // Binary transparent payload (SDP/ICE, max 256)
+  string extra = 8;            // Extension attributes (JSON: burn TTL, media meta, max 128)
+  string stanza_id = 9;        // Client-generated dedup/ACK correlation ID (UUID, max 64)
+}
