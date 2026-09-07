@@ -39,7 +39,9 @@ func NewDB(cfg DBConfig) (*gorm.DB, error) {
 
 	// DSN with WAL-relevant query params. GORM sqlite driver passes DSN to mattn/go-sqlite3.
 	// We also execute PRAGMAs post-open to guarantee they are applied regardless of driver defaults.
-	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%s&_foreign_keys=on",
+	// Gate-0 fix: _synchronous=FULL in DSN guarantees WAL durability on every pooled connection,
+	// not just the connection that ran PRAGMA synchronous=FULL.
+	dsn := fmt.Sprintf("%s?_journal_mode=WAL&_busy_timeout=%s&_foreign_keys=on&_synchronous=FULL",
 		cfg.Path, busy)
 
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{

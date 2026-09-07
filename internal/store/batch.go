@@ -70,6 +70,9 @@ func (w *BatchWriter) loop() {
 		if err := tx.Commit().Error; err != nil {
 			w.logger.Error("batch commit failed", zap.Error(err))
 			tx.Rollback()
+			// Gate-0 fix: always clear batch even on commit failure to avoid
+			// infinite retry loop and unbounded memory growth.
+			batch = batch[:0]
 			return
 		}
 		// Gate 0-3: ensure fsync after commit (WAL durability). The synchronous=FULL already fsyncs, but we also do file.Sync periodically.
@@ -87,8 +90,20 @@ func (w *BatchWriter) loop() {
 		case <-ticker.C:
 			flush()
 		case <-w.done:
-			flush()
-			return
+			// Gate-0 fix: drain the unconsumed queue completely before exiting,
+			// otherwise queued messages are dropped without flushing on Stop().
+			for {
+				select {
+				case msg := <-w.queue:
+					batch = append(batch, msg)
+					if len(batch) >= 100 {
+						flush()
+					}
+				default:
+					flush()
+					return
+				}
+			}
 		}
 	}
 }

@@ -203,18 +203,16 @@ func (a *Allocator) getOrCreate(covID string) *covSeq {
 		cs.watermark.Store(conv.CurrentWatermark)
 		// current should be at least max(seq) but we haven't loaded messages max yet.
 		// Query max(seq) for this cov to set current correctly.
+		// Gate-0 fix: current must never rewind below watermark.
+		// Start at max(maxSeq, watermark) to avoid sequence duplication after restart.
 		var maxSeq *int64
 		a.db.Model(&store.Message{}).Where("cov_id = ?", covID).Select("MAX(seq)").Scan(&maxSeq)
 		if maxSeq != nil && *maxSeq > conv.CurrentWatermark {
 			cs.current.Store(*maxSeq)
 			cs.watermark.Store(*maxSeq)
 		} else {
-			// watermark is ceiling, current starts at last actual seq (query) or 0.
-			if maxSeq != nil {
-				cs.current.Store(*maxSeq)
-			} else {
-				cs.current.Store(0)
-			}
+			// Never rewind: clamp current to watermark even when maxSeq is smaller or absent.
+			cs.current.Store(conv.CurrentWatermark)
 		}
 		a.seqs[covID] = cs
 		return cs

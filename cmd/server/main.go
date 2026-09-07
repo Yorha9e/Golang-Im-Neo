@@ -55,7 +55,10 @@ func main() {
 
 	// Demonstrate allocation (Gate-0 verification)
 	_ = allocator
-	_ = store.NewBatchWriter(db, zapLogger) // async writer skeleton (Stage-1)
+	// Gate-0 fix: BatchWriter worker loop must be started, otherwise queued messages are never flushed.
+	batchWriter := store.NewBatchWriter(db, zapLogger)
+	batchWriter.Start()
+	_ = batchWriter
 
 	// Initialize gateway hub with backpressure breaker (select default)
 	// hub := gateway.NewHub(zapLogger)

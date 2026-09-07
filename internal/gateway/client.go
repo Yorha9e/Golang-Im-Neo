@@ -107,13 +107,9 @@ func (c *Client) WritePump() {
 			}
 			w.Write(message)
 
-			// Batch queued messages in the channel to reduce syscalls (Marshal-Once optimization companion).
-			n := len(c.Send)
-			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.Send)
-			}
-
+			// Gate-0 fix: do NOT concatenate queued messages with '\n' separator —
+			// it corrupts binary Protobuf payloads. Each message is sent as its own
+			// WebSocket frame (next WritePump iteration handles the next message).
 			if err := w.Close(); err != nil {
 				return
 			}
@@ -130,7 +126,15 @@ func (c *Client) WritePump() {
 // Enqueue attempts to enqueue a message to the client's Send channel with backpressure breaker.
 // It uses select default to avoid blocking the broadcaster on slow clients (Gate 0-4).
 // Returns true if enqueued, false if the client's buffer is full (caller should kick the client).
-func (c *Client) Enqueue(msg []byte) bool {
+// Gate-0 fix: recover from send-on-closed-channel panic caused by concurrent
+// Unregister (close(client.Send)) racing with Enqueue (c.Send <- msg).
+func (c *Client) Enqueue(msg []byte) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Warn("gateway enqueue on closed channel, dropping message", zap.String("user", c.UserID), zap.String("session", c.SessionID))
+			ok = false
+		}
+	}()
 	select {
 	case c.Send <- msg:
 		return true

@@ -57,7 +57,13 @@ func (h *Hub) Run() {
 			shard.Lock()
 			if _, ok := shard.clients[client.SessionID]; ok {
 				delete(shard.clients, client.SessionID)
-				close(client.Send)
+				// Gate-0 fix: safe close that cannot panic on double-unregister
+				// and pairs with Client.Enqueue's recover to avoid
+				// send-on-closed-channel race with concurrent SendToUser/broadcast.
+				func() {
+					defer func() { _ = recover() }()
+					close(client.Send)
+				}()
 			}
 			shard.Unlock()
 			h.logger.Info("gateway client unregistered", zap.String("user", client.UserID))
