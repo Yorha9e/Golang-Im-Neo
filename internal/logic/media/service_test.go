@@ -242,6 +242,35 @@ func TestNonAvatarSizeLimit(t *testing.T) {
 	}
 }
 
+func TestUploadUnsizedOversizeRejected(t *testing.T) {
+	svc, _, cfg := newTestMediaService(t)
+	// Tiny limit keeps the test fast while proving the bounded-read path:
+	// the declared fh.Size is cleared/forged (unsized chunked upload), so
+	// the fh.Size fast path is bypassed and the LimitReader must catch it.
+	cfg.Media.MaxFileBytes = 1024
+	payload := bytes.Repeat([]byte("z"), 4096)
+
+	fh := fileHeaderFor(t, "big.jpg", payload)
+	fh.Size = 0 // simulate missing Content-Length / chunked stream
+	if _, err := svc.Upload("u_alice", "image", "private", fh); CodeOf(err) != CodeMediaTooLarge {
+		t.Fatalf("unsized oversize: got %v, want code 40001", err)
+	}
+
+	lying := fileHeaderFor(t, "big.jpg", payload)
+	lying.Size = 10 // declared size lies small; actual stream is oversize
+	if _, err := svc.Upload("u_alice", "image", "private", lying); CodeOf(err) != CodeMediaTooLarge {
+		t.Fatalf("lying-size oversize: got %v, want code 40001", err)
+	}
+
+	// Avatar path with bypassed size check.
+	cfg.Media.MaxAvatarBytes = 32
+	afh := fileHeaderFor(t, "a.png", bytes.Repeat([]byte("q"), 128))
+	afh.Size = 0
+	if _, err := svc.Upload("u_alice", "avatar", "private", afh); CodeOf(err) != CodeMediaTooLarge {
+		t.Fatalf("unsized avatar oversize: got %v, want code 40001", err)
+	}
+}
+
 func TestConfigDefaultsWhenMediaMissing(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.Port = 8080

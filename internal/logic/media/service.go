@@ -215,9 +215,11 @@ func (s *MediaService) Upload(uploaderID, mediaType, accessLevel string, fh *mul
 	}
 	defer src.Close()
 
-	// Single-pass read: stream into memory while feeding the sha256 hash.
+	// Single-pass bounded read: cap at limit+1 so an unsized/chunked
+	// stream (fh.Size == 0, missing Content-Length) cannot exhaust memory.
+	// Oversize is rejected below; the hash covers only accepted bytes.
 	h := sha256.New()
-	data, err := io.ReadAll(io.TeeReader(src, h))
+	data, err := io.ReadAll(io.TeeReader(io.LimitReader(src, limit+1), h))
 	if err != nil {
 		return nil, NewMediaError(CodeInternalServer, "failed to read uploaded file")
 	}
