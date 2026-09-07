@@ -1,4 +1,5 @@
-// Command imcli is the Stage-1 command-line verification client (MISSION M5).
+// Command imcli is the Stage-1+2 command-line verification client
+// (MISSIONS M5 + M4).
 //
 // Protobuf binary frames both ways (golang-im-neo-system/proto). Actions:
 //
@@ -9,6 +10,9 @@
 //	           ACK wait + -listen keep-reading window
 //	dedup-test fixed-stanza double-send, assert identical ACK seq (REPLAY PASS)
 //	e2e        two-user public-broadcast demo with PASS/FAIL summary
+//	friend-apply/-respond/-list/-pending/-delete   friend endpoints (cached login)
+//	media-upload multipart file upload, print mid + access_url
+//	admin-ban/-kick/-broadcast  admin endpoints (needs admin login)
 package main
 
 import (
@@ -19,9 +23,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,10 +44,18 @@ var (
 	fPass    = flag.String("pass", "", "password")
 	fDevice  = flag.String("device", "interactive", "device class (interactive|hardware)")
 	fDevName = flag.String("devname", "", "device name (defaults to <device>-cli)")
-	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e")
-	fMsg     = flag.String("msg", "", "chat text to send (chat action)")
+	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast")
+	fMsg     = flag.String("msg", "", "chat text (chat action) or broadcast content (admin-broadcast)")
 	fTo      = flag.String("to", "", "recipient user_id for PRIVATE_CHAT (chat action)")
 	fListen  = flag.Duration("listen", 5*time.Second, "keep-reading window after sends (chat action)")
+	// Stage-2 flags.
+	fTarget   = flag.String("target", "", "friend-apply: target username; friend-respond/friend-delete: target user_id; admin-ban: user_id to ban")
+	fRemark   = flag.String("remark", "", "remark for friend-apply")
+	fAction2  = flag.String("action2", "accept", "friend-respond decision: accept|reject")
+	fFile     = flag.String("file", "", "local file path for media-upload")
+	fMediaTyp = flag.String("mediatype", "avatar", "media type for media-upload (avatar|image|voice|video)")
+	fAccess   = flag.String("access", "public", "access level for media-upload (public|private)")
+	fSession  = flag.String("session", "", "session_id for admin-kick")
 )
 
 const ackTimeout = 5 * time.Second
@@ -104,6 +118,108 @@ func short(b []byte) string {
 		return string(b[:200]) + "..."
 	}
 	return string(b)
+}
+
+// doJSON issues one JSON request with method and decodes the envelope.
+func doJSON(method, base, path string, body interface{}, token string) (json.RawMessage, error) {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal body: %w", err)
+		}
+		rdr = bytes.NewReader(b)
+	} else if method == http.MethodPost {
+		rdr = strings.NewReader("{}")
+	}
+	req, err := http.NewRequest(method, strings.TrimSuffix(base, "/")+path, rdr)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if body != nil || method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w (is the server up?)", method, path, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	var env envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("bad envelope (http=%d body=%q): %w", resp.StatusCode, short(raw), err)
+	}
+	if env.Code != 0 {
+		return nil, fmt.Errorf("server code=%d msg=%q (http=%d)", env.Code, env.Msg, resp.StatusCode)
+	}
+	return env.Data, nil
+}
+
+// getJSON issues an authenticated GET and decodes the envelope data.
+func getJSON(base, path, token string) (json.RawMessage, error) {
+	return doJSON(http.MethodGet, base, path, nil, token)
+}
+
+// deleteJSON issues an authenticated DELETE and decodes the envelope data.
+func deleteJSON(base, path, token string) (json.RawMessage, error) {
+	return doJSON(http.MethodDelete, base, path, nil, token)
+}
+
+// postMultipart uploads one file plus form fields and decodes the envelope.
+func postMultipart(base, path, token, filePath string, fields map[string]string) (json.RawMessage, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	fw, err := w.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return nil, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(fw, f); err != nil {
+		return nil, fmt.Errorf("write file part: %w", err)
+	}
+	for k, v := range fields {
+		if err := w.WriteField(k, v); err != nil {
+			return nil, fmt.Errorf("write field %s: %w", k, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, strings.TrimSuffix(base, "/")+path, &buf)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("POST %s: %w (is the server up?)", path, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	var env envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("bad envelope (http=%d body=%q): %w", resp.StatusCode, short(raw), err)
+	}
+	if env.Code != 0 {
+		return nil, fmt.Errorf("server code=%d msg=%q (http=%d)", env.Code, env.Msg, resp.StatusCode)
+	}
+	return env.Data, nil
 }
 
 // ---------- session cache ----------
@@ -459,12 +575,142 @@ func actE2E() {
 	fmt.Println("e2e PASS: public broadcast ACK+delivery verified")
 }
 
+// ---------- Stage-2 actions (friend / media / admin) ----------
+
+func actFriendApply() {
+	sess := ensureLogin()
+	if *fTarget == "" {
+		fatalf("friend-apply needs -target <username> [-remark <text>]")
+	}
+	data, err := postJSON(sess.Server, "/api/v1/friends/apply", map[string]string{
+		"target_username": *fTarget, "remark": *fRemark,
+	}, sess.AccessToken)
+	if err != nil {
+		fatalf("friend-apply: %v", err)
+	}
+	var out struct {
+		TargetUserID string `json:"target_user_id"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		fatalf("friend-apply: bad response %s", short(data))
+	}
+	fmt.Printf("apply ok target_user_id=%s\n", out.TargetUserID)
+}
+
+func actFriendRespond() {
+	sess := ensureLogin()
+	if *fTarget == "" {
+		fatalf("friend-respond needs -target <applicant_user_id> [-action2 accept|reject]")
+	}
+	if *fAction2 != "accept" && *fAction2 != "reject" {
+		fatalf("friend-respond: -action2 must be accept or reject")
+	}
+	data, err := postJSON(sess.Server, "/api/v1/friends/respond", map[string]string{
+		"target_user_id": *fTarget, "action": *fAction2,
+	}, sess.AccessToken)
+	if err != nil {
+		fatalf("friend-respond: %v", err)
+	}
+	fmt.Printf("respond ok %s\n", short(data))
+}
+
+func actFriendList() {
+	sess := ensureLogin()
+	data, err := getJSON(sess.Server, "/api/v1/friends", sess.AccessToken)
+	if err != nil {
+		fatalf("friend-list: %v", err)
+	}
+	fmt.Printf("friends: %s\n", short(data))
+}
+
+func actFriendPending() {
+	sess := ensureLogin()
+	data, err := getJSON(sess.Server, "/api/v1/friends/pending", sess.AccessToken)
+	if err != nil {
+		fatalf("friend-pending: %v", err)
+	}
+	fmt.Printf("pending: %s\n", short(data))
+}
+
+func actFriendDelete() {
+	sess := ensureLogin()
+	if *fTarget == "" {
+		fatalf("friend-delete needs -target <friend_user_id>")
+	}
+	data, err := deleteJSON(sess.Server, "/api/v1/friends/"+*fTarget, sess.AccessToken)
+	if err != nil {
+		fatalf("friend-delete: %v", err)
+	}
+	fmt.Printf("delete ok %s\n", short(data))
+}
+
+func actMediaUpload() {
+	sess := ensureLogin()
+	if *fFile == "" {
+		fatalf("media-upload needs -file <path> [-mediatype avatar|image|voice|video] [-access public|private]")
+	}
+	data, err := postMultipart(sess.Server, "/api/v1/media/upload", sess.AccessToken, *fFile,
+		map[string]string{"media_type": *fMediaTyp, "access_level": *fAccess})
+	if err != nil {
+		fatalf("media-upload: %v", err)
+	}
+	var out struct {
+		MID       string `json:"mid"`
+		AccessURL string `json:"access_url"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil || out.MID == "" {
+		fatalf("media-upload: bad response %s", short(data))
+	}
+	fmt.Printf("upload ok mid=%s access_url=%s\n", out.MID, out.AccessURL)
+}
+
+func actAdminBan() {
+	sess := ensureLogin() // must be an admin login, e.g. -user superadmin
+	if *fTarget == "" {
+		fatalf("admin-ban needs -target <user_id>")
+	}
+	if _, err := postJSON(sess.Server, "/api/v1/admin/users/"+*fTarget+"/ban", map[string]string{}, sess.AccessToken); err != nil {
+		fatalf("admin-ban: %v", err)
+	}
+	fmt.Printf("ban ok user_id=%s\n", *fTarget)
+}
+
+func actAdminKick() {
+	sess := ensureLogin() // must be an admin login, e.g. -user superadmin
+	if *fSession == "" {
+		fatalf("admin-kick needs -session <session_id>")
+	}
+	if _, err := postJSON(sess.Server, "/api/v1/admin/sessions/"+*fSession+"/kick", map[string]string{}, sess.AccessToken); err != nil {
+		fatalf("admin-kick: %v", err)
+	}
+	fmt.Printf("kick ok session_id=%s\n", *fSession)
+}
+
+func actAdminBroadcast() {
+	sess := ensureLogin() // must be an admin login, e.g. -user superadmin
+	if *fMsg == "" {
+		fatalf("admin-broadcast needs -msg <content>")
+	}
+	if _, err := postJSON(sess.Server, "/api/v1/admin/broadcast", map[string]string{"content": *fMsg}, sess.AccessToken); err != nil {
+		fatalf("admin-broadcast: %v", err)
+	}
+	fmt.Printf("broadcast ok content=%q\n", *fMsg)
+}
+
 func usage() {
-	fmt.Fprintf(os.Stderr, `imcli — Stage-1 verification client
+	fmt.Fprintf(os.Stderr, `imcli — Stage-1+2 verification client
 Usage: imcli -action <name> [flags]
   actions: register | login | ticket | chat | dedup-test | e2e
+           friend-apply | friend-respond | friend-list | friend-pending | friend-delete
+           media-upload | admin-ban | admin-kick | admin-broadcast
   flags: -server (default http://127.0.0.1:8080) -user -pass
          -device (default interactive) -devname -msg -to -listen (default 5s)
+         -target (friend-apply username; friend-respond/friend-delete user_id; admin-ban user_id)
+         -remark (friend-apply) -action2 accept|reject (friend-respond, default accept)
+         -file -mediatype (default avatar) -access (default public) (media-upload)
+         -session (admin-kick) -msg (admin-broadcast content)
+  note: friend/media actions reuse the login session cache; admin actions need
+        an admin login (e.g. -user superadmin).
 `)
 }
 
@@ -494,6 +740,24 @@ func main() {
 		actDedupTest()
 	case "e2e":
 		actE2E()
+	case "friend-apply":
+		actFriendApply()
+	case "friend-respond":
+		actFriendRespond()
+	case "friend-list":
+		actFriendList()
+	case "friend-pending":
+		actFriendPending()
+	case "friend-delete":
+		actFriendDelete()
+	case "media-upload":
+		actMediaUpload()
+	case "admin-ban":
+		actAdminBan()
+	case "admin-kick":
+		actAdminKick()
+	case "admin-broadcast":
+		actAdminBroadcast()
 	default:
 		usage()
 		fatalf("unknown action %q", *fAction)

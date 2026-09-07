@@ -1,5 +1,6 @@
-// Package app wires the four Stage-1 layers (store/auth/handshake+gateway/
-// router) into one runnable server (MISSION M5).
+// Package app wires the Stage-1 layers (store/auth/handshake+gateway/
+// router) plus the Stage-2 services (friend/media/admin) into one runnable
+// server (MISSIONS M5 + M4).
 //
 // Layer flow (docs/DECOUPLED_ARCHITECTURE_SPEC.md):
 //
@@ -23,7 +24,10 @@ import (
 	"golang-im-neo-system/internal/config"
 	"golang-im-neo-system/internal/gateway"
 	"golang-im-neo-system/internal/handshake"
+	"golang-im-neo-system/internal/logic/admin"
 	"golang-im-neo-system/internal/logic/auth"
+	"golang-im-neo-system/internal/logic/friend"
+	"golang-im-neo-system/internal/logic/media"
 	"golang-im-neo-system/internal/logic/session"
 	"golang-im-neo-system/internal/middleware"
 	"golang-im-neo-system/internal/router"
@@ -43,6 +47,9 @@ type App struct {
 	Alloc   *session.Allocator
 	Auth    *auth.AuthService
 	Tickets *auth.TicketService
+	Friend  *friend.FriendService
+	Media   *media.MediaService
+	Admin   *admin.AdminService
 	Hub     *gateway.Hub
 	Router  *router.Router
 	Engine  *gin.Engine
@@ -81,6 +88,7 @@ func Build(cfg *config.Config) (*App, error) {
 	authSvc := auth.NewAuthService(db, cfg)
 	tickets := auth.NewTicketService()
 	jwtMW := middleware.JWTAuthMiddleware(cfg.Security.JWTSecret, db)
+	adminMW := middleware.AdminAuthMiddleware()
 
 	hub := gateway.NewHub(zapLogger)
 	go hub.Run()
@@ -88,12 +96,21 @@ func Build(cfg *config.Config) (*App, error) {
 	rtr := router.New(hub /*Emitter*/, batchWriter /*Persister*/, allocator, db, zapLogger)
 	hub.SetInboundHandler(rtr) // *router.Router satisfies gateway.InboundHandler
 
+	// Stage-2 services (M1/M2/M3): *gateway.Hub satisfies friend.Emitter,
+	// *router.Router satisfies friend.Invalidator.
+	friendSvc := friend.NewFriendService(db, hub, rtr, zapLogger)
+	mediaSvc := media.NewMediaService(db, cfg, zapLogger)
+	adminSvc := admin.NewAdminService(db, hub, zapLogger)
+
 	hs := handshake.NewHandler(hub, tickets /*TicketVerifier*/, zapLogger, nil /*secure default origin*/)
 
 	setGinMode(cfg.Server.Mode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	auth.RegisterRoutes(engine.Group("/api/v1/auth"), authSvc, tickets, jwtMW)
+	friend.RegisterRoutes(engine.Group("/api/v1/friends"), friendSvc, jwtMW)
+	media.RegisterRoutes(engine.Group("/api/v1/media"), mediaSvc, jwtMW)
+	admin.RegisterRoutes(engine.Group("/api/v1/admin"), adminSvc, jwtMW, adminMW)
 	engine.GET("/ws", hs.ServeWS)
 
 	zapLogger.Info("app wired",
@@ -104,6 +121,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Config: cfg, Logger: zapLogger, DB: db,
 		Batch: batchWriter, Alloc: allocator,
 		Auth: authSvc, Tickets: tickets,
+		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc,
 		Hub: hub, Router: rtr, Engine: engine,
 	}, nil
 }
