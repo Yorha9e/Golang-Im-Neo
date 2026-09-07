@@ -202,6 +202,52 @@ func TestWrongSecretAndAlgConfusion(t *testing.T) {
 	}
 }
 
+func TestRevokedSessionCheck(t *testing.T) {
+	db := newTestDB(t)
+	u := seedUser(t, db, "dave", "user", 1, 1)
+	now := time.Now()
+	live := &store.UserSession{
+		ID: "s_live", UserID: u.ID, DeviceClass: "interactive",
+		RefreshTokenHash: "h", TokenVersion: 1,
+		ExpiresAt: now.Add(time.Hour), LastActiveAt: now, CreatedAt: now,
+	}
+	if err := db.Create(live).Error; err != nil {
+		t.Fatal(err)
+	}
+	rev := &store.UserSession{
+		ID: "s_rev", UserID: u.ID, DeviceClass: "interactive",
+		RefreshTokenHash: "h", TokenVersion: 1, IsRevoked: 1,
+		ExpiresAt: now.Add(time.Hour), LastActiveAt: now, CreatedAt: now,
+	}
+	if err := db.Create(rev).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Live session row → allowed.
+	claims := validClaims(u)
+	claims["session_id"] = "s_live"
+	if w := serveThrough(db, testSecret, signToken(t, testSecret, claims)); w.Code != 200 {
+		t.Fatalf("live session: http=%d body=%s, want 200", w.Code, w.Body.String())
+	}
+
+	// Revoked session row → 401/10002.
+	claims = validClaims(u)
+	claims["session_id"] = "s_rev"
+	w := serveThrough(db, testSecret, signToken(t, testSecret, claims))
+	if w.Code != 401 {
+		t.Fatalf("revoked session: http=%d, want 401", w.Code)
+	}
+	var env errEnv
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil || env.Code != 10002 {
+		t.Fatalf("revoked session: %+v %v, want code 10002", env, err)
+	}
+
+	// Absent session row → still allowed (pre-existing tokens keep working).
+	if w := serveThrough(db, testSecret, signToken(t, testSecret, validClaims(u))); w.Code != 200 {
+		t.Fatalf("absent session row: http=%d body=%s, want 200", w.Code, w.Body.String())
+	}
+}
+
 func TestAdminAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {

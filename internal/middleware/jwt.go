@@ -86,6 +86,18 @@ func JWTAuthMiddleware(secret string, db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// Revoked-session check (M3, additive): when the token carries a
+		// session_id, reject it if that session row exists AND is revoked.
+		// An absent session row is allowed so pre-existing valid tokens keep
+		// working. One indexed primary-key lookup.
+		if sid := claimString(claims, "session_id"); sid != "" {
+			var sess store.UserSession
+			if err := db.Where("id = ?", sid).First(&sess).Error; err == nil && sess.IsRevoked != 0 {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 10002, "msg": "session revoked"})
+				return
+			}
+		}
+
 		c.Set("user_id", userID)
 		c.Set("username", claimString(claims, "username"))
 		c.Set("role", claimString(claims, "role"))
