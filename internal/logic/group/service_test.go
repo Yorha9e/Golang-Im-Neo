@@ -2,6 +2,7 @@ package group
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func newGroupTestService(t *testing.T) (*GroupService, *gorm.DB) {
 			sqlDB.Close()
 		}
 	})
-	return NewGroupService(db, nil), db
+	return NewGroupService(db, nil, nil), db
 }
 
 func createGroupUser(t *testing.T, db *gorm.DB, id, username string) {
@@ -540,4 +541,129 @@ func TestHelpers(t *testing.T) {
 		t.Fatalf("missing group ids = %v err=%v, want empty", ids, err)
 	}
 	_ = time.Now
+}
+
+// ---------- invalidator wiring (F2) ----------
+
+type fakeGroupInvalidator struct {
+	mu    sync.Mutex
+	calls []groupMemberKey
+}
+
+type groupMemberKey struct {
+	groupID string
+	userID  string
+}
+
+func (f *fakeGroupInvalidator) InvalidateGroupMember(groupID, userID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, groupMemberKey{groupID: groupID, userID: userID})
+}
+
+func (f *fakeGroupInvalidator) has(groupID, userID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.calls {
+		if c.groupID == groupID && c.userID == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeGroupInvalidator) reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = nil
+}
+
+func newGroupTestServiceWithInvalidator(t *testing.T, iv Invalidator) (*GroupService, *gorm.DB) {
+	t.Helper()
+	db, err := store.NewDB(store.DBConfig{Path: filepath.Join(t.TempDir(), "t.db")})
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			sqlDB.Close()
+		}
+	})
+	return NewGroupService(db, iv, nil), db
+}
+
+func TestInvalidatorWiring(t *testing.T) {
+	iv := &fakeGroupInvalidator{}
+	svc, db := newGroupTestServiceWithInvalidator(t, iv)
+	seedGroupUsers(t, db)
+	g := mustCreateGroup(t, svc, "u_alice", "g1")
+	gid := g.GroupID
+
+	// Create alone invalidates nothing.
+	if n := len(iv.calls); n != 0 {
+		t.Fatalf("create invalidations = %d, want 0", n)
+	}
+
+	// Invite invalidates each newly added member.
+	iv.reset()
+	if _, err := svc.Invite("u_alice", gid, []string{"u_bob", "u_carol"}); err != nil {
+		t.Fatalf("Invite: %v", err)
+	}
+	if !iv.has(gid, "u_bob") || !iv.has(gid, "u_carol") {
+		t.Fatalf("invite invalidations = %+v, want bob+carol", iv.calls)
+	}
+
+	// Join invalidates the joining user.
+	iv.reset()
+	if err := svc.Join("u_dave", gid); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if !iv.has(gid, "u_dave") {
+		t.Fatalf("join invalidations = %+v, want dave", iv.calls)
+	}
+
+	// SetMuted invalidates the mute target.
+	iv.reset()
+	if err := svc.SetMuted("u_alice", gid, "u_carol", true); err != nil {
+		t.Fatalf("SetMuted: %v", err)
+	}
+	if !iv.has(gid, "u_carol") {
+		t.Fatalf("mute invalidations = %+v, want carol", iv.calls)
+	}
+
+	// Kick invalidates the kicked user.
+	iv.reset()
+	if err := svc.Kick("u_alice", gid, "u_bob"); err != nil {
+		t.Fatalf("Kick: %v", err)
+	}
+	if !iv.has(gid, "u_bob") {
+		t.Fatalf("kick invalidations = %+v, want bob", iv.calls)
+	}
+
+	// Leave invalidates the leaving user.
+	iv.reset()
+	if err := svc.Leave("u_carol", gid); err != nil {
+		t.Fatalf("Leave: %v", err)
+	}
+	if !iv.has(gid, "u_carol") {
+		t.Fatalf("leave invalidations = %+v, want carol", iv.calls)
+	}
+
+	// Failed operations invalidate nothing.
+	iv.reset()
+	if err := svc.Kick("u_alice", gid, "u_bob"); CodeOf(err) != CodeGroupNotMember {
+		t.Fatalf("kick non-member: got %v, want 40002", err)
+	}
+	if len(iv.calls) != 0 {
+		t.Fatalf("failed kick invalidations = %+v, want none", iv.calls)
+	}
+
+	// Dismiss invalidates every remaining member (owner alice + dave).
+	iv.reset()
+	if err := svc.Dismiss("u_alice", gid); err != nil {
+		t.Fatalf("Dismiss: %v", err)
+	}
+	if !iv.has(gid, "u_alice") || !iv.has(gid, "u_dave") {
+		t.Fatalf("dismiss invalidations = %+v, want alice+dave", iv.calls)
+	}
 }
