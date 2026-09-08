@@ -302,3 +302,72 @@ func TestGetMessageByStanza(t *testing.T) {
 		t.Fatal("expected error for missing (cov, stanza), got nil")
 	}
 }
+
+// 9. empty stanza_id bypasses dedup: multiple messages with "" stanza in the
+// same conversation each persist as their own row with their own ACK
+// (Duplicated=false), while non-empty stanza replay still dedups.
+func TestBatchEmptyStanzaNoDedup(t *testing.T) {
+	db := openTestDB(t)
+	w := NewBatchWriter(db, zap.NewNop())
+	w.Start()
+	defer w.Stop()
+
+	cov := "cov-empty-stanza"
+	const n = 5
+	for i := 1; i <= n; i++ {
+		seq, ts := int64(i), int64(1700000100000+int64(i))
+		res := awaitResult(t, w.EnqueueSync(newTestMessage(cov, "", seq, ts)), fmt.Sprintf("empty stanza write %d", i))
+		if res.Err != nil {
+			t.Fatalf("empty stanza write %d err: %v", i, res.Err)
+		}
+		if res.Duplicated {
+			t.Fatalf("empty stanza write %d reported Duplicated=true, want false", i)
+		}
+		if res.Seq != seq || res.Timestamp != ts {
+			t.Fatalf("empty stanza write %d mismatch: got seq=%d ts=%d, want seq=%d ts=%d",
+				i, res.Seq, res.Timestamp, seq, ts)
+		}
+	}
+	if got := countByCov(t, db, cov); got != n {
+		t.Fatalf("expected %d rows for empty stanza messages, got %d", n, got)
+	}
+
+	// Whitespace-only stanza is also treated as empty (TrimSpace check).
+	wsSeq, wsTs := int64(6), int64(1700000100006)
+	wsRes := awaitResult(t, w.EnqueueSync(newTestMessage(cov, "   ", wsSeq, wsTs)), "whitespace stanza write")
+	if wsRes.Err != nil {
+		t.Fatalf("whitespace stanza write err: %v", wsRes.Err)
+	}
+	if wsRes.Duplicated {
+		t.Fatal("whitespace stanza write reported Duplicated=true, want false")
+	}
+	if wsRes.Seq != wsSeq || wsRes.Timestamp != wsTs {
+		t.Fatalf("whitespace stanza mismatch: got seq=%d ts=%d, want seq=%d ts=%d",
+			wsRes.Seq, wsRes.Timestamp, wsSeq, wsTs)
+	}
+	if got := countByCov(t, db, cov); got != n+1 {
+		t.Fatalf("expected %d rows after whitespace stanza write, got %d", n+1, got)
+	}
+
+	// Non-empty stanza_id messages still correctly deduplicate on replay.
+	origSeq, origTs := int64(100), int64(1700000100100)
+	first := awaitResult(t, w.EnqueueSync(newTestMessage(cov, "s-keep-dedup", origSeq, origTs)), "non-empty first write")
+	if first.Err != nil || first.Duplicated || first.Seq != origSeq || first.Timestamp != origTs {
+		t.Fatalf("non-empty first write unexpected: %+v", first)
+	}
+	retryMsg := newTestMessage(cov, "s-keep-dedup", 101, 1700000100199)
+	retry := awaitResult(t, w.EnqueueSync(retryMsg), "non-empty dedup retry")
+	if retry.Err != nil {
+		t.Fatalf("non-empty dedup retry err: %v", retry.Err)
+	}
+	if !retry.Duplicated {
+		t.Fatal("non-empty dedup retry reported Duplicated=false, want true")
+	}
+	if retry.Seq != origSeq || retry.Timestamp != origTs {
+		t.Fatalf("non-empty dedup replay mismatch: got seq=%d ts=%d, want seq=%d ts=%d",
+			retry.Seq, retry.Timestamp, origSeq, origTs)
+	}
+	if got := countByCov(t, db, cov); got != n+2 {
+		t.Fatalf("expected %d rows after dedup replay (no new row), got %d", n+2, got)
+	}
+}

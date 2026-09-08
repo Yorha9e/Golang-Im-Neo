@@ -109,8 +109,14 @@ func NewDB(cfg DBConfig) (*gorm.DB, error) {
 }
 
 func ensureExtraIndexes(db *gorm.DB) error {
-	// Message dedup: UNIQUE(cov_id, stanza_id) — client stanza_id replay delivers same seq without duplicate insert.
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_cov_stanza ON messages(cov_id, stanza_id)`).Error; err != nil {
+	// Message dedup: partial UNIQUE(cov_id, stanza_id) — client stanza_id replay delivers same seq without duplicate insert.
+	// Empty stanza_id messages bypass dedup (each persists as its own row): the partial predicate keeps
+	// ''/NULL rows out of the index so they never conflict. Drop the legacy full unique index first
+	// so databases created before this fix migrate cleanly.
+	if err := db.Exec(`DROP INDEX IF EXISTS uq_cov_stanza`).Error; err != nil {
+		return fmt.Errorf("drop legacy uq_cov_stanza: %w", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_cov_stanza ON messages(cov_id, stanza_id) WHERE stanza_id != '' AND stanza_id IS NOT NULL`).Error; err != nil {
 		return fmt.Errorf("create uq_cov_stanza: %w", err)
 	}
 	// Friendship partial unique (already via tag) but ensure correct WHERE clause on SQLite.
