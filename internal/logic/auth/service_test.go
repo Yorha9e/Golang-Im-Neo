@@ -155,8 +155,8 @@ func TestLoginWrongPassword(t *testing.T) {
 
 func TestLoginUserNotFound(t *testing.T) {
 	svc, _ := newTestService(t)
-	if _, _, _, _, err := svc.Login("ghost", "whatever_password", "interactive", ""); CodeOf(err) != CodeUserNotFound {
-		t.Fatalf("missing user: got %v, want code 20001", err)
+	if _, _, _, _, err := svc.Login("ghost", "whatever_password", "interactive", ""); CodeOf(err) != CodePasswordIncorrect {
+		t.Fatalf("missing user: got %v, want code 20003", err)
 	}
 }
 

@@ -142,8 +142,8 @@ func TestHTTPBusinessErrors(t *testing.T) {
 	}
 	// missing user
 	_, env = doPOST(t, r, "/api/v1/auth/login", `{"username":"nobody","password":"secure_password"}`, "")
-	if env.Code != CodeUserNotFound {
-		t.Fatalf("missing user: %+v, want 20001", env)
+	if env.Code != CodePasswordIncorrect {
+		t.Fatalf("missing user: %+v, want 20003", env)
 	}
 	// bad body
 	code, env := doPOST(t, r, "/api/v1/auth/register", `not-json`, "")
