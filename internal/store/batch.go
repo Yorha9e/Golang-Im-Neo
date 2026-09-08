@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -169,6 +170,13 @@ func (w *BatchWriter) loop() {
 			}
 			// RowsAffected == 0 → UNIQUE(cov_id, stanza_id) conflict → requery
 			// inside the SAME tx for the ORIGINAL seq/timestamp (ACK replay).
+			// Empty stanza_id messages never participate in dedup: the partial
+			// unique index excludes them, so bypass the dedup re-query entirely
+			// and report the message's own ACK (Duplicated=false).
+			if strings.TrimSpace(m.StanzaID) == "" {
+				pending[i] = WriteResult{Seq: m.Seq, Timestamp: m.Timestamp}
+				continue
+			}
 			var row struct {
 				Seq       int64
 				Timestamp int64
