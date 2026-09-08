@@ -18,6 +18,11 @@ import (
 // TicketTTL is the default ticket lifetime (30s per contract).
 const TicketTTL = 30 * time.Second
 
+// ticketSweepInterval is how often the background cleanup loop scans for
+// expired tickets. One minute keeps the sweep cheap relative to the 30s TTL
+// while bounding how long dead entries linger in memory.
+const ticketSweepInterval = time.Minute
+
 type ticketEntry struct {
 	userID      string
 	username    string
@@ -28,17 +33,27 @@ type ticketEntry struct {
 }
 
 // TicketService issues one-time WS handshake tickets from an in-memory store.
-// It is safe for concurrent use. Expiry is enforced lazily on Redeem.
+// It is safe for concurrent use. Expiry is enforced lazily on Redeem, and a
+// background cleanup loop sweeps expired entries every minute so dead tickets
+// do not linger in memory.
 type TicketService struct {
 	items sync.Map // ticket string -> ticketEntry
 
 	// TTL overrides the default 30s lifetime. Zero means TicketTTL.
 	// Exported so tests can shrink the window without changing production code.
 	TTL time.Duration
+
+	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
-// NewTicketService builds a TicketService with the default 30s TTL.
-func NewTicketService() *TicketService { return &TicketService{TTL: TicketTTL} }
+// NewTicketService builds a TicketService with the default 30s TTL and starts
+// the background expiry sweeper.
+func NewTicketService() *TicketService {
+	s := &TicketService{TTL: TicketTTL, stopChan: make(chan struct{})}
+	go s.cleanupLoop()
+	return s
+}
 
 func (s *TicketService) ttl() time.Duration {
 	if s == nil || s.TTL <= 0 {
@@ -90,4 +105,47 @@ func (s *TicketService) Redeem(ticket string) (userID, username, role, sessionID
 		return "", "", "", "", "", NewAuthError(CodeUnauthorized, "ticket expired")
 	}
 	return e.userID, e.username, e.role, e.sessionID, e.deviceClass, nil
+}
+
+// cleanupLoop runs in the background (started by NewTicketService) and sweeps
+// expired tickets every minute until Stop closes stopChan.
+func (s *TicketService) cleanupLoop() {
+	ticker := time.NewTicker(ticketSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.sweep()
+		case <-s.stopChan:
+			return
+		}
+	}
+}
+
+// sweep deletes every entry whose expiry is in the past.
+func (s *TicketService) sweep() {
+	s.items.Range(func(k, v any) bool {
+		e, ok := v.(ticketEntry)
+		if !ok {
+			s.items.Delete(k)
+			return true
+		}
+		if time.Now().After(e.expiresAt) {
+			s.items.Delete(k)
+		}
+		return true
+	})
+}
+
+// Stop terminates the background expiry sweeper. It is idempotent and safe to
+// call multiple times or on a zero-value TicketService.
+func (s *TicketService) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		if s.stopChan != nil {
+			close(s.stopChan)
+		}
+	})
 }

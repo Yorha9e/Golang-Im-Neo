@@ -168,6 +168,9 @@ func (a *App) Close() error {
 	if a == nil {
 		return nil
 	}
+	if a.Tickets != nil {
+		a.Tickets.Stop()
+	}
 	if a.Batch != nil {
 		a.Batch.Stop()
 	}
