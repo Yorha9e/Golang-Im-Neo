@@ -18,6 +18,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"golang-im-neo-system/internal/config"
@@ -44,6 +45,8 @@ const (
 	DefaultAccessTTL  = 2 * time.Hour
 	DefaultRefreshTTL = 14 * 24 * time.Hour
 )
+
+var dummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
 // AuthError is a typed business error carrying an SSOT code.
 // The HTTP adapter (http.go) maps it into the unified envelope.
@@ -214,7 +217,8 @@ func (s *AuthService) Register(username, password string) (string, error) {
 
 // Login authenticates a user and opens a new session row.
 // Returns (accessToken, refreshToken, userID, sessionID, err) with typed codes:
-// missing user → 20001, wrong password → 20003, banned → 20004.
+// missing user and wrong password both → 20003 (enumeration/timing protection),
+// banned → 20004.
 func (s *AuthService) Login(username, password, deviceClass, deviceName string) (string, string, string, string, error) {
 	fail := func(err error) (string, string, string, string, error) {
 		return "", "", "", "", err
@@ -223,7 +227,8 @@ func (s *AuthService) Login(username, password, deviceClass, deviceName string) 
 	var user store.User
 	if err := s.db.Where("username = ?", strings.TrimSpace(username)).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fail(NewAuthError(CodeUserNotFound, "user not found"))
+			_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash), []byte(password))
+			return fail(NewAuthError(CodePasswordIncorrect, "invalid username or password"))
 		}
 		return fail(NewAuthError(CodeInternalServer, "failed to load user"))
 	}
@@ -231,7 +236,7 @@ func (s *AuthService) Login(username, password, deviceClass, deviceName string) 
 		return fail(NewAuthError(CodeUserBanned, "user account is banned"))
 	}
 	if !util.CheckPassword(user.PasswordHash, password) {
-		return fail(NewAuthError(CodePasswordIncorrect, "incorrect password"))
+		return fail(NewAuthError(CodePasswordIncorrect, "invalid username or password"))
 	}
 
 	if deviceClass == "" {
