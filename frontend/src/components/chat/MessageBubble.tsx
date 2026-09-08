@@ -1,8 +1,10 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ChatMessage } from '../../store';
-import { Check, AlertCircle, Loader2 } from 'lucide-react';
+import { ChatMessage, useAuthStore } from '../../store';
+import { MsgType } from '../../proto/message';
+import { Check, AlertCircle, Loader2, Radio, Sparkles } from 'lucide-react';
 import { AudioBubble } from './AudioBubble';
+import { RoleBadge } from '../common/RoleBadge';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -15,20 +17,52 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onPreviewImage,
   onOpenProfile,
 }) => {
-  const { isSelf, content, extra, status, timestamp, from_uid, from_name, seq } = message;
+  const { isSelf, content, extra, status, timestamp, from_uid, from_name, from_role, from_avatar, type, seq } = message;
+  const myAvatar = useAuthStore((s) => s.avatarUrl);
 
-  // 解析 extra 元数据
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  };
+
+  // 1. 系统官方公告 (SYSTEM_NOTICE) 居中全宽卡片渲染 (消除神秘用户气泡)
+  if (type === MsgType.SYSTEM_NOTICE) {
+    return (
+      <div className="flex justify-center my-4 select-none px-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-lg w-full p-4 rounded-3xl bg-gradient-to-r from-[#F0EBE3] via-[#FAF8F5] to-[#F0EBE3] border border-amber-300/60 shadow-warm-sm flex items-start gap-3"
+        >
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-[#8B7355] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+            <Radio size={16} className="text-amber-100 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-[#8B7355] flex items-center gap-1">
+                <Sparkles size={11} />
+                <span>全服系统官方公告</span>
+              </span>
+              <span className="text-[10px] text-[#A3927C] font-mono">
+                {formatTime(timestamp)}
+              </span>
+            </div>
+            <p className="text-xs text-[#2E2419] leading-relaxed mt-1 select-text">
+              {content}
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // 2. 常规单聊/群聊/大厅消息渲染
   let mediaMeta: { type?: 'image' | 'voice' | 'video'; url?: string; duration?: number; peaks?: number[] } | null = null;
   if (extra) {
     try {
       mediaMeta = JSON.parse(extra);
     } catch {}
   }
-
-  const formatTime = (ts: number) => {
-    const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-  };
 
   const displayName = from_name || from_uid || '用户';
 
@@ -44,23 +78,28 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div
           title={`点击查看 @${displayName} 的个人主页与动态\nUID: ${from_uid}`}
           onClick={() => onOpenProfile?.(displayName)}
-          className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] flex items-center justify-center font-bold text-xs text-[#FAF8F5] shadow-warm-sm shrink-0 cursor-pointer hover:scale-105 hover:shadow-walnut-glow transition-all select-none"
+          className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] flex items-center justify-center font-bold text-xs text-[#FAF8F5] shadow-warm-sm shrink-0 cursor-pointer hover:scale-105 hover:shadow-walnut-glow transition-all select-none overflow-hidden"
         >
-          {displayName.slice(0, 1).toUpperCase()}
+          {from_avatar ? (
+            <img src={from_avatar} alt="头像" className="w-full h-full object-cover" />
+          ) : (
+            displayName.slice(0, 1).toUpperCase()
+          )}
         </div>
       )}
 
       {/* 气泡主体 */}
       <div className={`flex flex-col max-w-md ${isSelf ? 'items-end' : 'items-start'}`}>
-        {/* 发送者 Username (点击亦可查看主页) */}
+        {/* 发送者 Username 与身份牌 */}
         {!isSelf && (
           <div
             onClick={() => onOpenProfile?.(displayName)}
-            className="flex items-center gap-1.5 mb-1 px-1 cursor-pointer hover:underline text-[#8B7355] select-text"
+            className="flex items-center gap-1.5 mb-1 px-1 cursor-pointer select-text"
           >
-            <span className="text-xs font-semibold">
+            <span className="text-xs font-semibold text-[#8B7355] hover:underline">
               {displayName}
             </span>
+            <RoleBadge role={from_role} username={displayName} size="sm" />
           </div>
         )}
 
@@ -142,8 +181,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
       {/* 己方头像 */}
       {isSelf && (
-        <div className="w-8 h-8 rounded-xl bg-[#8B7355] flex items-center justify-center font-bold text-xs text-[#FAF8F5] shadow-warm-sm shrink-0 select-none">
-          我
+        <div className="w-8 h-8 rounded-xl bg-[#8B7355] flex items-center justify-center font-bold text-xs text-[#FAF8F5] shadow-warm-sm shrink-0 select-none overflow-hidden">
+          {myAvatar ? (
+            <img src={myAvatar} alt="我的头像" className="w-full h-full object-cover" />
+          ) : (
+            '我'
+          )}
         </div>
       )}
     </motion.div>

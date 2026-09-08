@@ -9,38 +9,46 @@ export interface HistoryMessageItem {
   timestamp: number;
   extra?: string;
   stanza_id?: string;
+  content_type?: number;
+}
+
+export interface HistoryResp {
+  messages: HistoryMessageItem[];
+  has_more: boolean;
 }
 
 export const messageApi = {
-  // 获取单聊历史消息
-  getHistory: async (covId: string, sinceSeq: number = 0, limit: number = 50) => {
-    const res = await apiClient.get<ApiResponse<{ messages: HistoryMessageItem[] }>>('/messages/history', {
+  // 1. 统一历史漫游 (通过 cov_id)
+  getHistory: async (covId: string, beforeSeq: number = 0, limit: number = 50) => {
+    const res = await apiClient.get<ApiResponse<HistoryResp>>('/messages/history', {
       params: {
         cov_id: covId,
-        since_seq: sinceSeq,
+        before_seq: beforeSeq,
         limit,
       },
     });
     return res.data;
   },
-};
 
-export const adminApi = {
-  // 封禁用户
-  banUser: async (userId: string) => {
-    const res = await apiClient.post<ApiResponse<null>>(`/admin/users/${userId}/ban`);
+  // 2. 大厅历史消息快捷接口 (GET /messages/hall/history)
+  getHallHistory: async (beforeSeq: number = 0, limit: number = 50) => {
+    const res = await apiClient.get<ApiResponse<HistoryResp>>('/messages/hall/history', {
+      params: {
+        before_seq: beforeSeq,
+        limit,
+      },
+    });
     return res.data;
   },
 
-  // 精准踢掉单个会话
-  kickSession: async (sessionId: string) => {
-    const res = await apiClient.post<ApiResponse<null>>(`/admin/sessions/${sessionId}/kick`);
-    return res.data;
-  },
-
-  // 发送全服系统广播
-  broadcast: async (content: string) => {
-    const res = await apiClient.post<ApiResponse<null>>('/admin/broadcast', { content });
+  // 3. 私聊历史消息快捷接口 (GET /messages/private/:target_user_id/history)
+  getPrivateHistory: async (targetUserId: string, beforeSeq: number = 0, limit: number = 50) => {
+    const res = await apiClient.get<ApiResponse<HistoryResp>>(`/messages/private/${targetUserId}/history`, {
+      params: {
+        before_seq: beforeSeq,
+        limit,
+      },
+    });
     return res.data;
   },
 };

@@ -84,7 +84,7 @@ func recvTimeout(t *testing.T, ch chan []byte) []byte {
 func TestBanUser(t *testing.T) {
 	db := newTestDB(t)
 	h := newTestHub()
-	svc := NewAdminService(db, h, zap.NewNop())
+	svc := NewAdminService(db, h, nil, zap.NewNop())
 
 	u := seedUser(t, db, "u_victim")
 	victimTV := u.TokenVersion
@@ -123,7 +123,7 @@ func TestBanUser(t *testing.T) {
 
 func TestBanUserUnknown(t *testing.T) {
 	db := newTestDB(t)
-	svc := NewAdminService(db, newTestHub(), zap.NewNop())
+	svc := NewAdminService(db, newTestHub(), nil, zap.NewNop())
 	err := svc.BanUser("u_missing")
 	if err == nil || CodeOf(err) != CodeUserNotFound {
 		t.Fatalf("BanUser unknown: err=%v, want code 20001", err)
@@ -136,7 +136,7 @@ func TestBanUserUnknown(t *testing.T) {
 func TestKickSessionKeepsOtherSession(t *testing.T) {
 	db := newTestDB(t)
 	h := newTestHub()
-	svc := NewAdminService(db, h, zap.NewNop())
+	svc := NewAdminService(db, h, nil, zap.NewNop())
 
 	u := seedUser(t, db, "u_multi")
 	seedSession(t, db, "s-desk", u.ID, "interactive")
@@ -187,7 +187,7 @@ func TestKickSessionKeepsOtherSession(t *testing.T) {
 
 func TestKickSessionUnknown(t *testing.T) {
 	db := newTestDB(t)
-	svc := NewAdminService(db, newTestHub(), zap.NewNop())
+	svc := NewAdminService(db, newTestHub(), nil, zap.NewNop())
 	err := svc.KickSession("s_missing")
 	if err == nil || CodeOf(err) != CodeUserNotFound {
 		t.Fatalf("KickSession unknown: err=%v, want code 20001", err)
@@ -200,7 +200,7 @@ func TestKickSessionUnknown(t *testing.T) {
 func TestBroadcast(t *testing.T) {
 	db := newTestDB(t)
 	h := newTestHub()
-	svc := NewAdminService(db, h, zap.NewNop())
+	svc := NewAdminService(db, h, nil, zap.NewNop())
 
 	c1 := gateway.NewClient(h, nil, "u_1", "interactive", "s-1", zap.NewNop())
 	c2 := gateway.NewClient(h, nil, "u_2", "interactive", "s-2", zap.NewNop())

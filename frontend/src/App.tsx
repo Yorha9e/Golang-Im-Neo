@@ -13,6 +13,9 @@ import { VoiceRecordModal } from './components/chat/VoiceRecordModal';
 import { AudioCallOverlay } from './components/audio/AudioCallOverlay';
 import { IncomingCallModal } from './components/audio/IncomingCallModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
+import { AdminDashboardModal } from './components/admin/AdminDashboardModal';
+import { GlobalBroadcastBanner } from './components/common/GlobalBroadcastBanner';
+import { SystemNoticeDrawer } from './components/common/SystemNoticeDrawer';
 import { MsgType } from './proto/message';
 
 export const App: React.FC = () => {
@@ -29,8 +32,10 @@ export const App: React.FC = () => {
   const [activeGroupIdForManager, setActiveGroupIdForManager] = useState<string | null>(null);
   const [isVoiceRecordOpen, setIsVoiceRecordOpen] = useState(false);
   
-  // 他人主页弹窗
+  // 他人主页弹窗、管理员看板与公告中心抽屉
   const [inspectingUsername, setInspectingUsername] = useState<string | null>(null);
+  const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
+  const [isNoticeDrawerOpen, setIsNoticeDrawerOpen] = useState(false);
 
   useEffect(() => {
     // 1. 初始化鉴权状态
@@ -71,7 +76,12 @@ export const App: React.FC = () => {
 
       {/* 2. 登录后展示主应用界面 */}
       {isAuthenticated && (
-        <AppLayout activeView={activeView} setActiveView={setActiveView}>
+        <AppLayout
+          activeView={activeView}
+          setActiveView={setActiveView}
+          onOpenAdminDashboard={() => setIsAdminDashboardOpen(true)}
+          onOpenNoticeDrawer={() => setIsNoticeDrawerOpen(true)}
+        >
           {activeView === 'chat' ? (
             <>
               {/* 左侧导航栏 */}
@@ -103,10 +113,25 @@ export const App: React.FC = () => {
             onClose={() => setInspectingUsername(null)}
             onOpenAddFriend={(uname) => handleOpenAddFriend(uname)}
           />
+
+          {/* 6. 管理员运维与性能监控看板 */}
+          <AdminDashboardModal
+            isOpen={isAdminDashboardOpen}
+            onClose={() => setIsAdminDashboardOpen(false)}
+          />
+
+          {/* 7. 系统公告历史抽屉 */}
+          <SystemNoticeDrawer
+            isOpen={isNoticeDrawerOpen}
+            onClose={() => setIsNoticeDrawerOpen(false)}
+          />
         </AppLayout>
       )}
 
-      {/* 6. 全局辅助弹窗组件 */}
+      {/* 8. 全局顶部悬浮流光公告横幅 (新公告即刻滑出) */}
+      <GlobalBroadcastBanner />
+
+      {/* 9. 全局辅助弹窗组件 */}
       <AddFriendModal
         isOpen={isAddFriendOpen}
         onClose={() => {

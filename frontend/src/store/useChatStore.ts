@@ -4,6 +4,7 @@ import { wsClient } from '../socket/wsClient';
 import { messageApi, groupApi } from '../api';
 import { soundEffects } from '../audio/soundEffects';
 import { useFriendStore } from './useFriendStore';
+import { useAuthStore } from './useAuthStore';
 
 export interface ChatMessage {
   id: string;              // 本地或服务端消息唯一 ID
@@ -11,6 +12,8 @@ export interface ChatMessage {
   type: MsgType;
   from_uid: string;
   from_name: string;       // 清晰友好的用户名 (如 alice, bob)
+  from_role?: string;      // 发送者身份角色 (superadmin, admin, user)
+  from_avatar?: string;    // 发送者头像 URL
   to_uid?: string;
   content: string;
   timestamp: number;
@@ -29,16 +32,30 @@ export interface Conversation {
   unreadCount?: number;
 }
 
+export interface SystemNoticeItem {
+  id: string;
+  content: string;
+  timestamp: number;
+}
+
 export interface ChatState {
   activeConversation: Conversation;
   conversations: Conversation[];
   messages: Record<string, ChatMessage[]>; // covId -> ChatMessage[]
   
+  // 系统公告通知中心
+  systemNotices: SystemNoticeItem[];
+  activeBroadcastNotice: SystemNoticeItem | null;
+  hasUnreadNotice: boolean;
+  dismissBroadcastNotice: () => void;
+  clearSystemNotices: () => void;
+  markNoticesAsRead: () => void;
+
   setActiveConversation: (conv: Conversation) => void;
   sendTextMessage: (content: string, extra?: string) => Promise<void>;
   sendMediaMessage: (mediaUrl: string, mediaType: 'image' | 'voice' | 'video', extraData?: any) => Promise<void>;
   addIncomingMessage: (msg: WsMessagePayload, currentUserId: string) => void;
-  loadHistory: (covId: string) => Promise<void>;
+  loadHistory: (covId: string, isLoadMore?: boolean) => Promise<void>;
   updateMessageAck: (stanzaId: string, seq: number) => void;
 }
 
@@ -56,11 +73,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     hall: [],
   },
 
+  systemNotices: [],
+  activeBroadcastNotice: null,
+  hasUnreadNotice: false,
+
+  dismissBroadcastNotice: () => set({ activeBroadcastNotice: null }),
+  
+  clearSystemNotices: () => {
+    set({ systemNotices: [], hasUnreadNotice: false });
+    localStorage.setItem('neo_last_read_notice_time', Date.now().toString());
+  },
+
+  markNoticesAsRead: () => {
+    set({ hasUnreadNotice: false });
+    localStorage.setItem('neo_last_read_notice_time', Date.now().toString());
+  },
+
   setActiveConversation: (conv) => {
     set({ activeConversation: conv });
     const currentMessages = get().messages[conv.id];
     if (!currentMessages || currentMessages.length === 0) {
-      get().loadHistory(conv.id);
+      get().loadHistory(conv.id, false);
     }
   },
 
@@ -69,6 +102,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const stanza_id = generateStanzaId();
     const currentUserId = localStorage.getItem('neo_user_id') || '';
     const currentUsername = localStorage.getItem('neo_username') || '我';
+    const currentRole = useAuthStore.getState().role || 'user';
+    const currentAvatar = useAuthStore.getState().avatarUrl || '';
 
     // 1. 确定消息类型
     let msgType = MsgType.CHAT;
@@ -81,7 +116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       to_uid = activeConv.id;
     }
 
-    // 2. 将当前发送者的真实 Username 注入 extra 中，以便接收端直接展示
+    // 2. 将当前发送者的真实 Username, Role 与 Avatar 注入 extra 中
     let extraObj: any = {};
     if (extra) {
       try {
@@ -89,6 +124,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch {}
     }
     extraObj.from_username = currentUsername;
+    extraObj.from_role = currentRole;
+    if (currentAvatar) extraObj.from_avatar = currentAvatar;
     const finalExtra = JSON.stringify(extraObj);
 
     // 3. 本地乐观消息
@@ -98,6 +135,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       type: msgType,
       from_uid: currentUserId,
       from_name: currentUsername,
+      from_role: currentRole,
+      from_avatar: currentAvatar,
       to_uid,
       content,
       timestamp: Date.now(),
@@ -178,7 +217,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    // 计算所属会话 ID
+    const stanza_id = msg.stanza_id || generateStanzaId();
+    const timestamp = Number(msg.timestamp || Date.now());
+
+    // 1. 处理全服系统广播公告 (SYSTEM_NOTICE)
+    if (msg.type === MsgType.SYSTEM_NOTICE) {
+      const noticeItem: SystemNoticeItem = {
+        id: stanza_id,
+        content: msg.content || '系统通知',
+        timestamp,
+      };
+
+      // 触发顶部悬浮流光横幅、未读红点与通知音
+      soundEffects.playNotifySound();
+      set((state) => ({
+        activeBroadcastNotice: noticeItem,
+        hasUnreadNotice: true,
+        systemNotices: [noticeItem, ...state.systemNotices.filter((n) => n.id !== stanza_id)],
+      }));
+
+      // 同时注入大厅消息流作为居中系统卡片
+      const sysMsg: ChatMessage = {
+        id: stanza_id,
+        stanza_id,
+        type: MsgType.SYSTEM_NOTICE,
+        from_uid: 'system',
+        from_name: '系统官方公告',
+        from_role: 'superadmin',
+        content: msg.content || '',
+        timestamp,
+        seq: Number(msg.seq || 0),
+        status: 'success',
+        isSelf: false,
+      };
+
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          hall: [...(state.messages['hall'] || []), sysMsg],
+        },
+      }));
+      return;
+    }
+
+    // 2. 计算常规聊天所属会话 ID
     let covId = 'hall';
     if (msg.type === MsgType.PRIVATE_CHAT) {
       covId = msg.from_uid === currentUserId ? msg.to_uid || 'hall' : msg.from_uid || 'hall';
@@ -186,7 +268,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       covId = msg.to_uid || 'hall';
     }
 
-    const stanza_id = msg.stanza_id || generateStanzaId();
     const isSelf = msg.from_uid === currentUserId;
 
     // 避免乐观消息与推回消息重复
@@ -198,18 +279,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    // 解析发送者清晰的用户名 (优先从 extra 读，其次从好友列表匹配)
+    // 解析发送者用户名、角色与头像
     let fromUsername = '';
+    let fromRole = 'user';
+    let fromAvatar = '';
     if (msg.extra) {
       try {
         const parsed = JSON.parse(msg.extra);
         if (parsed.from_username) fromUsername = parsed.from_username;
+        if (parsed.from_role) fromRole = parsed.from_role;
+        if (parsed.from_avatar) fromAvatar = parsed.from_avatar;
       } catch {}
     }
-    if (!fromUsername && msg.from_uid) {
+    if (msg.from_uid) {
       const friend = useFriendStore.getState().friends.find((f) => f.user_id === msg.from_uid);
       if (friend) {
-        fromUsername = friend.username;
+        if (!fromUsername) fromUsername = friend.username;
+        if (!fromAvatar && friend.avatar_url) fromAvatar = friend.avatar_url;
       }
     }
 
@@ -219,9 +305,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       type: msg.type,
       from_uid: msg.from_uid || '',
       from_name: fromUsername || msg.from_uid || '用户',
+      from_role: fromRole,
+      from_avatar: fromAvatar,
       to_uid: msg.to_uid || '',
       content: msg.content || '',
-      timestamp: Number(msg.timestamp || Date.now()),
+      timestamp,
       seq: Number(msg.seq || 0),
       extra: msg.extra || '',
       status: 'success',
@@ -240,65 +328,108 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  loadHistory: async (covId: string) => {
+  loadHistory: async (covId: string, isLoadMore = false) => {
     try {
       const activeConv = get().activeConversation;
       const currentUserId = localStorage.getItem('neo_user_id') || '';
-
-      if (activeConv.type === 'group') {
-        const res = await groupApi.getGroupHistory(covId, 0, 50);
-        if (res.code === 0 && res.data && res.data.messages) {
-          const list: ChatMessage[] = res.data.messages.map((m: any) => ({
-            id: m.stanza_id || `hist_${m.seq}`,
-            stanza_id: m.stanza_id || `hist_${m.seq}`,
-            type: MsgType.GROUP_CHAT,
-            from_uid: m.from_uid,
-            from_name: m.from_uid,
-            to_uid: m.to_uid,
-            content: m.content,
-            timestamp: m.timestamp,
-            seq: m.seq,
-            extra: m.extra,
-            status: 'success',
-            isSelf: m.from_uid === currentUserId,
-          }));
-          set((state) => ({
-            messages: {
-              ...state.messages,
-              [covId]: list,
-            },
-          }));
-        }
-      } else if (activeConv.type === 'private') {
-        const targetId = activeConv.id;
-        const u1 = currentUserId < targetId ? currentUserId : targetId;
-        const u2 = currentUserId < targetId ? targetId : currentUserId;
-        const fullCovId = `cov:${u1}:${u2}`;
-
-        const res = await messageApi.getHistory(fullCovId, 0, 50);
-        if (res.code === 0 && res.data && res.data.messages) {
-          const list: ChatMessage[] = res.data.messages.map((m) => ({
-            id: m.stanza_id || `hist_${m.seq}`,
-            stanza_id: m.stanza_id || `hist_${m.seq}`,
-            type: MsgType.PRIVATE_CHAT,
-            from_uid: m.from_uid,
-            from_name: m.from_uid === currentUserId ? '我' : activeConv.name,
-            to_uid: m.to_uid,
-            content: m.content,
-            timestamp: m.timestamp,
-            seq: m.seq,
-            extra: m.extra,
-            status: 'success',
-            isSelf: m.from_uid === currentUserId,
-          }));
-          set((state) => ({
-            messages: {
-              ...state.messages,
-              [covId]: list,
-            },
-          }));
+      const existingList = get().messages[covId] || [];
+      
+      let beforeSeq = 0;
+      if (isLoadMore && existingList.length > 0) {
+        const validSeqs = existingList.map((m) => m.seq).filter((s) => s > 0);
+        if (validSeqs.length > 0) {
+          beforeSeq = Math.min(...validSeqs);
         }
       }
+
+      let rawMessages: any[] = [];
+
+      if (activeConv.type === 'hall') {
+        const res = await messageApi.getHallHistory(beforeSeq, 50);
+        if (res.code === 0 && res.data && res.data.messages) {
+          rawMessages = res.data.messages;
+        }
+      } else if (activeConv.type === 'private') {
+        const res = await messageApi.getPrivateHistory(activeConv.id, beforeSeq, 50);
+        if (res.code === 0 && res.data && res.data.messages) {
+          rawMessages = res.data.messages;
+        }
+      } else if (activeConv.type === 'group') {
+        const res = await groupApi.getGroupHistory(covId, beforeSeq, 50);
+        if (res.code === 0 && res.data && res.data.messages) {
+          rawMessages = res.data.messages;
+        }
+      }
+
+      if (rawMessages.length === 0) return;
+
+      const friends = useFriendStore.getState().friends;
+      const formattedHistory: ChatMessage[] = rawMessages.map((m: any) => {
+        let fromName = '';
+        let fromRole = 'user';
+        let fromAvatar = '';
+        if (m.extra) {
+          try {
+            const parsed = JSON.parse(m.extra);
+            if (parsed.from_username) fromName = parsed.from_username;
+            if (parsed.from_role) fromRole = parsed.from_role;
+            if (parsed.from_avatar) fromAvatar = parsed.from_avatar;
+          } catch {}
+        }
+        if (m.from_uid) {
+          if (m.from_uid === currentUserId) {
+            fromName = '我';
+            fromRole = useAuthStore.getState().role || 'user';
+            fromAvatar = useAuthStore.getState().avatarUrl || '';
+          } else {
+            const f = friends.find((fr) => fr.user_id === m.from_uid);
+            if (f) {
+              if (!fromName) fromName = f.username;
+              if (!fromAvatar && f.avatar_url) fromAvatar = f.avatar_url;
+            } else if (activeConv.type === 'private' && m.from_uid === activeConv.id) {
+              if (!fromName) fromName = activeConv.name;
+            }
+          }
+        }
+
+        const isSelf = m.from_uid === currentUserId;
+
+        return {
+          id: m.stanza_id || `hist_${m.seq}`,
+          stanza_id: m.stanza_id || `hist_${m.seq}`,
+          type: activeConv.type === 'hall' ? MsgType.CHAT : activeConv.type === 'private' ? MsgType.PRIVATE_CHAT : MsgType.GROUP_CHAT,
+          from_uid: m.from_uid || '',
+          from_name: fromName || m.from_uid || '用户',
+          from_role: fromRole,
+          from_avatar: fromAvatar,
+          to_uid: m.to_uid || '',
+          content: m.content || '',
+          timestamp: Number(m.timestamp || Date.now()),
+          seq: Number(m.seq || 0),
+          extra: m.extra || '',
+          status: 'success',
+          isSelf,
+        };
+      });
+
+      set((state) => {
+        const currentList = isLoadMore ? (state.messages[covId] || []) : [];
+        const map = new Map<string, ChatMessage>();
+        
+        [...formattedHistory, ...currentList].forEach((item) => {
+          const key = item.stanza_id || `seq_${item.seq}`;
+          map.set(key, item);
+        });
+
+        const merged = Array.from(map.values()).sort((a, b) => a.seq - b.seq || a.timestamp - b.timestamp);
+
+        return {
+          messages: {
+            ...state.messages,
+            [covId]: merged,
+          },
+        };
+      });
     } catch (err) {
       console.warn('拉取历史消息异常:', err);
     }

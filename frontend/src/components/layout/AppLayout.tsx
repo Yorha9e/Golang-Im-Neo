@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { useAuthStore, useAudioStore, useFriendStore } from '../../store';
+import { useAuthStore, useAudioStore, useFriendStore, useChatStore } from '../../store';
 import { wsClient, ConnectionStatus } from '../../socket/wsClient';
+import { RoleBadge } from '../common/RoleBadge';
 import {
   Sparkles,
   Volume2,
   VolumeX,
-  User,
   LogOut,
-  Radio,
-  Share2,
+  Shield,
+  Bell,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -16,16 +16,21 @@ interface AppLayoutProps {
   children: React.ReactNode;
   activeView: 'chat' | 'profile';
   setActiveView: (view: 'chat' | 'profile') => void;
+  onOpenAdminDashboard?: () => void;
+  onOpenNoticeDrawer?: () => void;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
   children,
   activeView,
   setActiveView,
+  onOpenAdminDashboard,
+  onOpenNoticeDrawer,
 }) => {
-  const { username, logout } = useAuthStore();
+  const { username, role, avatarUrl, nickname, logout } = useAuthStore();
   const { soundEnabled, setSoundEnabled } = useAudioStore();
   const { fetchAll } = useFriendStore();
+  const { hasUnreadNotice, markNoticesAsRead } = useChatStore();
   const [connStatus, setConnStatus] = useState<ConnectionStatus>(wsClient.getStatus());
 
   useEffect(() => {
@@ -38,6 +43,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     });
     return () => unsub();
   }, [fetchAll]);
+
+  const isAdmin = role === 'admin' || role === 'superadmin' || username === 'superadmin';
+
+  const handleOpenNoticeCenter = () => {
+    markNoticesAsRead();
+    onOpenNoticeDrawer?.();
+  };
 
   const getStatusBadge = () => {
     switch (connStatus) {
@@ -97,6 +109,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
         {/* 右侧功能控制 */}
         <div className="flex items-center gap-2.5">
+          {/* 管理员专属运维监控入口 */}
+          {isAdmin && (
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.05 }}
+              onClick={onOpenAdminDashboard}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-[#8B7355] text-white text-xs font-semibold shadow-warm-sm hover:opacity-95 transition-all mr-1"
+              title="打开系统性能与全服运维监控中心"
+            >
+              <Shield size={14} />
+              <span>运维看板</span>
+            </motion.button>
+          )}
+
           {/* 页面切换 Tab (聊天 / 动态广场) */}
           <div className="flex items-center p-1 rounded-xl bg-[#F0EBE3] border border-[#C9B99A]/40 mr-2">
             <button
@@ -121,6 +147,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             </button>
           </div>
 
+          {/* 系统通知公告小铃铛 (未读黄点提醒 + 点击即刻已读消除) */}
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={handleOpenNoticeCenter}
+            title="系统公告历史与通知中心"
+            className="relative p-2 rounded-xl border bg-[#F0EBE3] border-[#C9B99A]/50 text-[#8B7355] hover:bg-[#EAE4DC] transition-colors"
+          >
+            <Bell size={18} />
+            {hasUnreadNotice && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 border-2 border-[#FAF8F5] animate-pulse" />
+            )}
+          </motion.button>
+
           {/* 音效开关 */}
           <motion.button
             whileTap={{ scale: 0.9 }}
@@ -135,14 +174,21 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </motion.button>
 
-          {/* 用户身份与主页入口 */}
+          {/* 用户身份与管理员身份牌 */}
           <div className="flex items-center gap-2 pl-2 border-l border-[#C9B99A]/30">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#C9B99A] to-[#8B7355] flex items-center justify-center text-[#FAF8F5] font-bold text-xs shadow-warm-sm">
-              {username.slice(0, 1).toUpperCase()}
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#C9B99A] to-[#8B7355] flex items-center justify-center text-[#FAF8F5] font-bold text-xs shadow-warm-sm overflow-hidden shrink-0">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="头像" className="w-full h-full object-cover" />
+              ) : (
+                username.slice(0, 1).toUpperCase()
+              )}
             </div>
-            <span className="text-xs font-semibold text-[#2E2419] hidden sm:inline-block max-w-[100px] truncate">
-              {username}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-[#2E2419] hidden sm:inline-block max-w-[110px] truncate" title={`@${username}`}>
+                {nickname || username}
+              </span>
+              <RoleBadge role={role} username={username} size="sm" />
+            </div>
           </div>
 
           {/* 退出登录 */}

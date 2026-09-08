@@ -5,3 +5,4 @@ export * from './group';
 export * from './media';
 export * from './profile';
 export * from './message';
+export * from './admin';

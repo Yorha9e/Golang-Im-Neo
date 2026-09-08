@@ -12,7 +12,7 @@
 //	e2e        two-user public-broadcast demo with PASS/FAIL summary
 //	friend-apply/-respond/-list/-pending/-delete   friend endpoints (cached login)
 //	media-upload multipart file upload, print mid + access_url
-//	admin-ban/-kick/-broadcast  admin endpoints (needs admin login)
+//	admin-ban/-kick/-broadcast/-stats  admin endpoints (needs admin login)
 //	group-create/-list/-info/-members/-invite/-join/-leave/-dismiss/-kick/
 //	-role/-mute/-unmute/-history/-chat   Stage-4 group endpoints + WS fan-out
 //	signal-send/-listen   Stage-4 WebRTC signaling bypass frames over WS
@@ -49,7 +49,7 @@ var (
 	fPass    = flag.String("pass", "", "password")
 	fDevice  = flag.String("device", "interactive", "device class (interactive|hardware)")
 	fDevName = flag.String("devname", "", "device name (defaults to <device>-cli)")
-	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast|group-create|group-list|group-info|group-members|group-invite|group-join|group-leave|group-dismiss|group-kick|group-role|group-mute|group-unmute|group-history|group-chat|signal-send|signal-listen|profile-get|profile-update|post-create|post-delete|post-card")
+	fAction  = flag.String("action", "", "action: register|login|ticket|chat|dedup-test|e2e|friend-apply|friend-respond|friend-list|friend-pending|friend-delete|media-upload|admin-ban|admin-kick|admin-broadcast|admin-stats|group-create|group-list|group-info|group-members|group-invite|group-join|group-leave|group-dismiss|group-kick|group-role|group-mute|group-unmute|group-history|group-chat|signal-send|signal-listen|profile-get|profile-update|post-create|post-delete|post-card|users|admin-users")
 	fMsg     = flag.String("msg", "", "chat text (chat action) or broadcast content (admin-broadcast)")
 	fTo      = flag.String("to", "", "recipient user_id for PRIVATE_CHAT (chat action)")
 	fListen  = flag.Duration("listen", 5*time.Second, "keep-reading window after sends (chat action)")
@@ -72,6 +72,10 @@ var (
 	fMediaURL  = flag.String("mediaurl", "", "media_url for post-create (image|video)")
 	fBVID      = flag.String("bvid", "", "bilibili_bvid for post-create (bilibili)")
 	fPreview   = flag.String("preview", "", "raw JSON object for link_preview in post-create")
+	// User discovery / admin governance flags.
+	fKeyword = flag.String("keyword", "", "keyword for users/admin-users search (matches username or nickname)")
+	fStatus  = flag.Int("status", -1, "status filter for admin-users (-1 means all)")
+	fPage    = flag.Int("page", 1, "page number for users/admin-users")
 )
 
 const ackTimeout = 5 * time.Second
@@ -713,6 +717,15 @@ func actAdminBroadcast() {
 	fmt.Printf("broadcast ok content=%q\n", *fMsg)
 }
 
+func actAdminStats() {
+	sess := ensureLogin() // must be an admin login, e.g. -user superadmin
+	data, err := getJSON(sess.Server, "/api/v1/admin/stats", sess.AccessToken)
+	if err != nil {
+		fatalf("admin-stats: %v", err)
+	}
+	fmt.Printf("stats: %s\n", string(data))
+}
+
 // ---------- Stage-4 actions (group + signaling) ----------
 
 func groupPath(id, suffix string) string {
@@ -1139,17 +1152,51 @@ func actPostCard() {
 	fmt.Printf("card: %s\ntarget_url=%s\n", short(data), target)
 }
 
+func actUsers() {
+	sess := ensureLogin()
+	q := url.Values{}
+	q.Set("page", fmt.Sprint(*fPage))
+	q.Set("limit", fmt.Sprint(*fLimit))
+	if strings.TrimSpace(*fKeyword) != "" {
+		q.Set("keyword", strings.TrimSpace(*fKeyword))
+	}
+	data, err := getJSON(sess.Server, "/api/v1/users?"+q.Encode(), sess.AccessToken)
+	if err != nil {
+		fatalf("users: %v", err)
+	}
+	fmt.Printf("users: %s\n", string(data))
+}
+
+func actAdminUsers() {
+	sess := ensureLogin() // must be an admin login, e.g. -user superadmin
+	q := url.Values{}
+	q.Set("page", fmt.Sprint(*fPage))
+	q.Set("limit", fmt.Sprint(*fLimit))
+	if strings.TrimSpace(*fKeyword) != "" {
+		q.Set("keyword", strings.TrimSpace(*fKeyword))
+	}
+	if *fStatus >= 0 {
+		q.Set("status", fmt.Sprint(*fStatus))
+	}
+	data, err := getJSON(sess.Server, "/api/v1/admin/users?"+q.Encode(), sess.AccessToken)
+	if err != nil {
+		fatalf("admin-users: %v", err)
+	}
+	fmt.Printf("admin-users: %s\n", string(data))
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `imcli — Stage-1+2+4 verification client
 Usage: imcli -action <name> [flags]
   actions: register | login | ticket | chat | dedup-test | e2e
            friend-apply | friend-respond | friend-list | friend-pending | friend-delete
-           media-upload | admin-ban | admin-kick | admin-broadcast
+           media-upload | admin-ban | admin-kick | admin-broadcast | admin-stats
            group-create | group-list | group-info | group-members | group-invite
            group-join | group-leave | group-dismiss | group-kick | group-role
            group-mute | group-unmute | group-history | group-chat
            signal-send | signal-listen
            profile-get | profile-update | post-create | post-delete | post-card
+           users | admin-users
   flags: -server (default http://127.0.0.1:8080) -user -pass
          -device (default interactive) -devname -msg -to -listen (default 5s)
          -target (friend-apply username; friend-respond/friend-delete user_id; admin-ban user_id;
@@ -1166,6 +1213,8 @@ Usage: imcli -action <name> [flags]
          -posttype (post-create media type text|image|video|bilibili, default text)
          -msg (post-create content) -mediaurl (post-create media_url)
          -bvid (post-create bilibili_bvid) -preview (post-create link_preview raw JSON object)
+         -keyword (users/admin-users search keyword) -status (admin-users status filter, default -1 all)
+         -page (users/admin-users page number, default 1) -limit (users/admin-users page size)
   note: friend/media/group actions reuse the login session cache; admin actions need
         an admin login (e.g. -user superadmin).
 `)
@@ -1215,6 +1264,8 @@ func main() {
 		actAdminKick()
 	case "admin-broadcast":
 		actAdminBroadcast()
+	case "admin-stats":
+		actAdminStats()
 	case "group-create":
 		actGroupCreate()
 	case "group-list":
@@ -1257,6 +1308,10 @@ func main() {
 		actPostDelete()
 	case "post-card":
 		actPostCard()
+	case "users":
+		actUsers()
+	case "admin-users":
+		actAdminUsers()
 	default:
 		usage()
 		fatalf("unknown action %q", *fAction)

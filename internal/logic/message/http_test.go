@@ -231,3 +231,38 @@ func TestMessageHistoryValidation(t *testing.T) {
 		t.Errorf("unauthenticated should be 401, got http=%d", code)
 	}
 }
+
+func TestGroupChatHistoryAuthz(t *testing.T) {
+	r, db, _, tokens, ids := newMsgHTTPSetup(t)
+
+	// Seed a group and group members
+	grpID := "grp_test_authz"
+	now := time.Now()
+	if err := db.Create(&store.Group{
+		ID: grpID, Name: "Secret Group", OwnerID: ids["alice"], CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	for _, uid := range []string{ids["alice"], ids["bob"]} {
+		if err := db.Create(&store.GroupMember{
+			GroupID: grpID, UserID: uid, Role: "member", JoinedVia: "create", CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			t.Fatalf("seed member %s: %v", uid, err)
+		}
+	}
+
+	covID := "cov:grp:" + grpID
+	seedMsg(t, db, covID, 1, ids["alice"], grpID, "secret group message", 5000)
+
+	// 1. Alice (member) queries group history -> 200
+	code, env := doReq(r, http.MethodGet, "/api/v1/messages/history?cov_id="+covID, tokens["alice"])
+	if code != http.StatusOK || env.Code != 0 {
+		t.Fatalf("member Alice should succeed, got http=%d code=%d", code, env.Code)
+	}
+
+	// 2. Carol (non-member) queries group history -> 403 Forbidden / 40002
+	code, env = doReq(r, http.MethodGet, "/api/v1/messages/history?cov_id="+covID, tokens["carol"])
+	if code != http.StatusForbidden || env.Code != CodeGroupNotMember {
+		t.Fatalf("non-member Carol should be 403/40002, got http=%d code=%d", code, env.Code)
+	}
+}

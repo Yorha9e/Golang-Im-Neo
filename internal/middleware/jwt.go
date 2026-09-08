@@ -98,9 +98,9 @@ func JWTAuthMiddleware(secret string, db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
-		c.Set("user_id", userID)
-		c.Set("username", claimString(claims, "username"))
-		c.Set("role", claimString(claims, "role"))
+		c.Set("user_id", user.ID)
+		c.Set("username", user.Username)
+		c.Set("role", user.Role)
 		c.Set("session_id", claimString(claims, "session_id"))
 		c.Set("device_class", claimString(claims, "device_class"))
 		c.Next()

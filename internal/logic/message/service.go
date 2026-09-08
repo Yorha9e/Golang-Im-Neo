@@ -17,17 +17,19 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"golang-im-neo-system/internal/logic/group"
 	"golang-im-neo-system/internal/store"
 )
 
 // SSOT error codes (TECH_SELECTION_AND_CONTRACTS.md §3).
 const (
-	CodeSuccess        = 0
-	CodeParamInvalid   = 10001 // ERR_PARAM_INVALID
-	CodeUnauthorized   = 10002 // ERR_UNAUTHORIZED
-	CodeForbidden      = 10003 // ERR_FORBIDDEN
-	CodeFriendNotFound = 30001 // ERR_FRIEND_NOT_FOUND
-	CodeInternal       = 50001 // ERR_INTERNAL_SERVER
+	CodeSuccess          = 0
+	CodeParamInvalid     = 10001 // ERR_PARAM_INVALID
+	CodeUnauthorized     = 10002 // ERR_UNAUTHORIZED
+	CodeForbidden        = 10003 // ERR_FORBIDDEN
+	CodeFriendNotFound   = 30001 // ERR_FRIEND_NOT_FOUND
+	CodeGroupNotMember   = 40002 // ERR_GROUP_NOT_MEMBER
+	CodeInternal         = 50001 // ERR_INTERNAL_SERVER
 )
 
 // Hall conversation ids.
@@ -77,9 +79,7 @@ func HTTPStatusOf(code int) int {
 		return 400
 	case CodeUnauthorized:
 		return 401
-	case CodeForbidden:
-		return 403
-	case CodeFriendNotFound:
+	case CodeForbidden, CodeFriendNotFound, CodeGroupNotMember:
 		return 403
 	case CodeInternal:
 		return 500
@@ -236,13 +236,18 @@ func (s *MessageService) GetHistory(me, covID string, beforeSeq int64, limit int
 		return s.queryCov(covID, beforeSeq, limit)
 	}
 
-	// Group conversation: allow roaming without friendship checks
-	// (membership is enforced by the group history endpoint; here we just
-	// serve the window).
+	// Group conversation: require active group membership to prevent IDOR / history leakage.
 	if strings.HasPrefix(covID, "cov:grp:") {
-		rest := strings.TrimPrefix(covID, "cov:grp:")
-		if strings.TrimSpace(rest) == "" || strings.Contains(rest, ":") {
+		groupID := strings.TrimPrefix(covID, "cov:grp:")
+		if strings.TrimSpace(groupID) == "" || strings.Contains(groupID, ":") {
 			return nil, NewMessageError(CodeParamInvalid, "invalid cov_id")
+		}
+		isMember, err := group.IsMember(s.db, groupID, me)
+		if err != nil {
+			return nil, NewMessageError(CodeInternal, "failed to check group membership")
+		}
+		if !isMember {
+			return nil, NewMessageError(CodeGroupNotMember, "not a group member")
 		}
 		return s.queryCov(covID, beforeSeq, limit)
 	}

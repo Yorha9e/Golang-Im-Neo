@@ -16,6 +16,8 @@ package app
 
 import (
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -32,6 +34,7 @@ import (
 	"golang-im-neo-system/internal/logic/message"
 	"golang-im-neo-system/internal/logic/profile"
 	"golang-im-neo-system/internal/logic/session"
+	"golang-im-neo-system/internal/logic/user"
 	"golang-im-neo-system/internal/middleware"
 	"golang-im-neo-system/internal/router"
 	"golang-im-neo-system/internal/store"
@@ -56,6 +59,7 @@ type App struct {
 	Profile *profile.ProfileService
 	Group   *group.GroupService
 	Message *message.MessageService
+	User    *user.UserService
 	Hub     *gateway.Hub
 	Router  *router.Router
 	Engine  *gin.Engine
@@ -106,10 +110,11 @@ func Build(cfg *config.Config) (*App, error) {
 	// *router.Router satisfies friend.Invalidator.
 	friendSvc := friend.NewFriendService(db, hub, rtr, zapLogger)
 	mediaSvc := media.NewMediaService(db, cfg, zapLogger)
-	adminSvc := admin.NewAdminService(db, hub, zapLogger)
+	adminSvc := admin.NewAdminService(db, hub, batchWriter, zapLogger)
 	profileSvc := profile.NewProfileService(db, nil, zapLogger)
 	groupSvc := group.NewGroupService(db, zapLogger)
 	messageSvc := message.NewMessageService(db, zapLogger)
+	userSvc := user.NewUserService(db, zapLogger)
 
 	hs := handshake.NewHandler(hub, tickets /*TicketVerifier*/, zapLogger, nil /*secure default origin*/)
 
@@ -124,7 +129,18 @@ func Build(cfg *config.Config) (*App, error) {
 	profile.RegisterRoutes(engine.Group("/api/v1/profile"), engine.Group("/api/v1/posts"), profileSvc, jwtMW)
 	message.RegisterRoutes(engine.Group("/api/v1/messages"), messageSvc, jwtMW)
 	admin.RegisterRoutes(engine.Group("/api/v1/admin"), adminSvc, jwtMW, adminMW)
+	user.RegisterRoutes(engine.Group("/api/v1/users"), userSvc, jwtMW)
 	engine.GET("/ws", hs.ServeWS)
+
+	// Public root health probe (no auth): {"code":0,"msg":"success","data":{"status":"ok","uptime_seconds":...}}.
+	buildTime := time.Now()
+	engine.GET("/health", func(c *gin.Context) {
+		uptime := int64(time.Since(buildTime).Seconds())
+		if uptime < 0 {
+			uptime = 0
+		}
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{"status": "ok", "uptime_seconds": uptime}})
+	})
 
 	// Built-in Web Console
 	engine.StaticFile("/", "./web/index.html")
@@ -138,7 +154,7 @@ func Build(cfg *config.Config) (*App, error) {
 		Config: cfg, Logger: zapLogger, DB: db,
 		Batch: batchWriter, Alloc: allocator,
 		Auth: authSvc, Tickets: tickets,
-		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Profile: profileSvc, Group: groupSvc, Message: messageSvc,
+		Friend: friendSvc, Media: mediaSvc, Admin: adminSvc, Profile: profileSvc, Group: groupSvc, Message: messageSvc, User: userSvc,
 		Hub: hub, Router: rtr, Engine: engine,
 	}, nil
 }

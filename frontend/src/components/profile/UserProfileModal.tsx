@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { profileApi, UserProfile } from '../../api';
 import { useAuthStore, useFriendStore, useChatStore } from '../../store';
+import { RoleBadge } from '../common/RoleBadge';
 import {
   X,
-  User,
   Sparkles,
   MessageSquare,
   UserPlus,
@@ -26,6 +26,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const { username: currentUsername } = useAuthStore();
   const { friends } = useFriendStore();
@@ -58,6 +59,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const isSelf = username === currentUsername;
   const isFriend = friends.some((f) => f.username === username);
   const friendData = friends.find((f) => f.username === username);
+
+  const displayUser = profile?.user || profile;
+  const avatarUrl = displayUser?.avatar_url || '';
+  const postList = profile?.posts || [];
+
+  const formatTime = (timeVal: any) => {
+    if (!timeVal) return '';
+    const d = typeof timeVal === 'number' ? new Date(timeVal) : new Date(timeVal);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString();
+  };
 
   // 发起私聊
   const handleStartChat = () => {
@@ -99,26 +110,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             {/* 1. 顶部个人资料看板 */}
             <div className="flex items-start gap-4 pb-5 border-b border-[#C9B99A]/30 shrink-0 pr-8">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] text-white flex items-center justify-center text-2xl font-bold shadow-walnut-glow overflow-hidden shrink-0">
-                {profile?.avatar_url ? (
-                  <img src={profile.avatar_url} alt="头像" className="w-full h-full object-cover" />
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="头像" className="w-full h-full object-cover" />
                 ) : (
                   username.slice(0, 1).toUpperCase()
                 )}
               </div>
 
               <div className="flex-1 min-w-0">
-                {/* 用户名与 @id 并排展示 */}
+                {/* 用户名、身份牌与 @id 并排展示 */}
                 <div className="flex items-center flex-wrap gap-2">
                   <h3 className="font-bold text-base text-[#2E2419] truncate">
-                    {profile?.nickname || profile?.username || username}
+                    {displayUser?.nickname || displayUser?.username || username}
                   </h3>
+                  <RoleBadge username={displayUser?.username || username} size="sm" />
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[#8B7355]/15 text-[#8B7355] font-medium">
-                    @{profile?.user_id || username}
+                    @{displayUser?.user_id || username}
                   </span>
                 </div>
 
                 <p className="text-xs text-[#8B7355] mt-1 line-clamp-2">
-                  {profile?.signature || '「这个人很神秘，还没有填写个性签名。」'}
+                  {displayUser?.signature || '「这个人很神秘，还没有填写个性签名。」'}
                 </p>
 
                 {/* 快捷操作按钮 */}
@@ -154,31 +166,38 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <div className="flex items-center justify-between text-xs font-semibold text-[#8B7355] px-1 mb-2">
                 <span className="flex items-center gap-1.5">
                   <Sparkles size={14} />
-                  <span>发布的动态 ({profile?.posts?.length || 0})</span>
+                  <span>发布的动态 ({postList.length})</span>
                 </span>
               </div>
 
-              {profile?.posts?.length === 0 ? (
+              {postList.length === 0 ? (
                 <div className="py-16 text-center text-xs text-[#A3927C]">
                   该用户暂未发布过任何公开动态
                 </div>
               ) : (
-                profile?.posts?.map((post) => (
+                postList.map((post) => (
                   <div
                     key={post.id}
                     className="p-4 rounded-2xl glass-input space-y-2.5 text-xs text-[#4A3B2C]"
                   >
                     {/* 动态内容 */}
                     {post.content && (
-                      <p className="leading-relaxed whitespace-pre-wrap">
+                      <p className="leading-relaxed whitespace-pre-wrap select-text">
                         {post.content}
                       </p>
                     )}
 
                     {/* 配图 */}
                     {post.media_url && (
-                      <div className="rounded-xl overflow-hidden max-h-48 border border-[#C9B99A]/30">
-                        <img src={post.media_url} alt="动态图" className="w-full h-full object-cover" />
+                      <div
+                        onClick={() => setLightboxUrl(post.media_url!)}
+                        className="rounded-xl overflow-hidden border border-[#C9B99A]/30 bg-[#F0EBE3]/50 flex items-center justify-center cursor-zoom-in group/img p-1 transition-all hover:border-[#8B7355]/60"
+                      >
+                        <img
+                          src={post.media_url}
+                          alt="动态图"
+                          className="w-full max-h-[320px] object-contain rounded-lg transition-transform group-hover/img:scale-[1.01]"
+                        />
                       </div>
                     )}
 
@@ -207,7 +226,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
                     {/* 时间 */}
                     <div className="text-[10px] text-[#A3927C] pt-1">
-                      {new Date(post.created_at).toLocaleString()}
+                      {formatTime(post.created_at)}
                     </div>
                   </div>
                 ))
@@ -216,6 +235,41 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </>
         )}
       </motion.div>
+
+      {/* 3. 全屏大图灯箱预览 */}
+      <AnimatePresence>
+        {lightboxUrl && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setLightboxUrl(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 bg-black/75 backdrop-blur-md cursor-zoom-out select-none"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+              className="relative max-w-5xl max-h-[90vh] rounded-3xl overflow-hidden glass-card shadow-warm-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img
+                src={lightboxUrl}
+                alt="大图全屏预览"
+                className="w-full h-full object-contain max-h-[85vh] rounded-2xl"
+              />
+              <button
+                onClick={() => setLightboxUrl(null)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors shadow-lg"
+                title="关闭预览"
+              >
+                <X size={20} />
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
