@@ -43,7 +43,7 @@ func newGroupHTTPSetup(t *testing.T) (*gin.Engine, *gorm.DB, *GroupService, map[
 			t.Fatalf("seed %q: %v", u.name, err)
 		}
 	}
-	svc := NewGroupService(db, nil)
+	svc := NewGroupService(db, nil, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

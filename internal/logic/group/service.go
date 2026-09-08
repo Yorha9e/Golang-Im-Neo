@@ -117,16 +117,23 @@ const DefaultMaxMembers = 500
 
 // GroupService is the pure group business logic.
 type GroupService struct {
-	db     *gorm.DB
-	logger *zap.Logger
+	db          *gorm.DB
+	invalidator Invalidator
+	logger      *zap.Logger
+}
+
+// Invalidator drops a cached group-membership verdict.
+// Satisfied by *router.Router.
+type Invalidator interface {
+	InvalidateGroupMember(groupID, userID string)
 }
 
 // NewGroupService builds the service.
-func NewGroupService(db *gorm.DB, logger *zap.Logger) *GroupService {
+func NewGroupService(db *gorm.DB, invalidator Invalidator, logger *zap.Logger) *GroupService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &GroupService{db: db, logger: logger}
+	return &GroupService{db: db, invalidator: invalidator, logger: logger}
 }
 
 // GroupView is the JSON view of a group.
@@ -487,7 +494,13 @@ func (s *GroupService) Invite(actorID, groupID string, targetUserIDs []string) (
 		}
 		return invited, NewGroupError(CodeInternal, "failed to invite")
 	}
-	return append(invited, toAdd...), nil
+	invited = append(invited, toAdd...)
+	if s.invalidator != nil {
+		for _, uid := range invited {
+			s.invalidator.InvalidateGroupMember(groupID, uid)
+		}
+	}
+	return invited, nil
 }
 
 // Join adds the user as a member (joined_via=join), reviving a soft-deleted
@@ -554,6 +567,9 @@ func (s *GroupService) Join(userID, groupID string) error {
 		}
 		return NewGroupError(CodeInternal, "failed to join group")
 	}
+	if s.invalidator != nil {
+		s.invalidator.InvalidateGroupMember(groupID, userID)
+	}
 	return nil
 }
 
@@ -583,6 +599,9 @@ func (s *GroupService) Leave(userID, groupID string) error {
 	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&store.GroupMember{}).Error; err != nil {
 		return NewGroupError(CodeInternal, "failed to leave group")
 	}
+	if s.invalidator != nil {
+		s.invalidator.InvalidateGroupMember(groupID, userID)
+	}
 	return nil
 }
 
@@ -611,6 +630,9 @@ func (s *GroupService) Kick(actorID, groupID, targetID string) error {
 	}
 	if err := s.db.Where("group_id = ? AND user_id = ?", groupID, targetID).Delete(&store.GroupMember{}).Error; err != nil {
 		return NewGroupError(CodeInternal, "failed to kick member")
+	}
+	if s.invalidator != nil {
+		s.invalidator.InvalidateGroupMember(groupID, targetID)
 	}
 	return nil
 }
@@ -709,6 +731,9 @@ func (s *GroupService) SetMuted(actorID, groupID, targetID string, muted bool) e
 		Updates(updates).Error; err != nil {
 		return NewGroupError(CodeInternal, "failed to set mute")
 	}
+	if s.invalidator != nil {
+		s.invalidator.InvalidateGroupMember(groupID, targetID)
+	}
 	return nil
 }
 
@@ -729,6 +754,18 @@ func (s *GroupService) Dismiss(actorID, groupID string) error {
 	if g.Status == 0 {
 		return nil
 	}
+	// Snapshot active members so every cached membership verdict can be dropped
+	// after the rows are gone.
+	var memberIDs []string
+	if s.invalidator != nil {
+		var rows []store.GroupMember
+		if err := s.db.Select("user_id").Where("group_id = ?", groupID).Find(&rows).Error; err != nil {
+			return NewGroupError(CodeInternal, "failed to load members")
+		}
+		for _, m := range rows {
+			memberIDs = append(memberIDs, m.UserID)
+		}
+	}
 	now := time.Now()
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&store.Group{}).
@@ -739,6 +776,11 @@ func (s *GroupService) Dismiss(actorID, groupID string) error {
 		return tx.Where("group_id = ?", groupID).Delete(&store.GroupMember{}).Error
 	}); err != nil {
 		return NewGroupError(CodeInternal, "failed to dismiss group")
+	}
+	if s.invalidator != nil {
+		for _, uid := range memberIDs {
+			s.invalidator.InvalidateGroupMember(groupID, uid)
+		}
 	}
 	return nil
 }

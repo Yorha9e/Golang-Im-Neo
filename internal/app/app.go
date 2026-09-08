@@ -112,7 +112,7 @@ func Build(cfg *config.Config) (*App, error) {
 	mediaSvc := media.NewMediaService(db, cfg, zapLogger)
 	adminSvc := admin.NewAdminService(db, hub, batchWriter, zapLogger)
 	profileSvc := profile.NewProfileService(db, nil, zapLogger)
-	groupSvc := group.NewGroupService(db, zapLogger)
+	groupSvc := group.NewGroupService(db, rtr, zapLogger)
 	messageSvc := message.NewMessageService(db, zapLogger)
 	userSvc := user.NewUserService(db, zapLogger)
 
