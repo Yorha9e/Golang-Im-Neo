@@ -469,9 +469,20 @@ func TestListFriendsAndPending(t *testing.T) {
 	mustApply(t, svc, "u_alice", "bob", "pls")
 	mustApply(t, svc, "u_carol", "bob", "hi")
 
+	// Target bob sees 2 pending incoming requests
 	pend, err := svc.ListPending("u_bob")
 	if err != nil || len(pend) != 2 {
 		t.Fatalf("pending bob: %+v err=%v", pend, err)
+	}
+
+	// Applicants (alice, carol) must NOT see outgoing requests in their incoming pending list
+	pendAlice, err := svc.ListPending("u_alice")
+	if err != nil || len(pendAlice) != 0 {
+		t.Fatalf("applicant alice should have 0 incoming pending requests, got: %+v", pendAlice)
+	}
+	pendCarol, err := svc.ListPending("u_carol")
+	if err != nil || len(pendCarol) != 0 {
+		t.Fatalf("applicant carol should have 0 incoming pending requests, got: %+v", pendCarol)
 	}
 	byUser := map[string]PendingItem{}
 	for _, p := range pend {

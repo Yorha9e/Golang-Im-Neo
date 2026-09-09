@@ -243,7 +243,7 @@ func (s *FriendService) ListPending(userID string) ([]PendingItem, error) {
 	if err := s.db.Table("friendships f").
 		Select("f.user_id, f.remark, u.username, f.created_at").
 		Joins("JOIN users u ON u.id = f.user_id").
-		Where("f.friend_id = ? AND f.status = 'pending' AND f.deleted_at IS NULL AND u.deleted_at IS NULL", userID).
+		Where("f.friend_id = ? AND f.initiator_id != ? AND f.status = 'pending' AND f.deleted_at IS NULL AND u.deleted_at IS NULL", userID, userID).
 		Scan(&rows).Error; err != nil {
 		return nil, NewFriendError(CodeInternal, "failed to list pending")
 	}
