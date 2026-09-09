@@ -154,11 +154,33 @@ func TestPublicHallHistory(t *testing.T) {
 			t.Errorf("msg[%d] seq = %d, want %d", i, m.Seq, i+1)
 		}
 	}
+	// Sender profile hydration: hall messages must carry from_username/from_role.
+	for i, m := range res.Messages {
+		if m.FromUID != "u_alice" {
+			t.Errorf("msg[%d] from_uid = %q, want u_alice", i, m.FromUID)
+		}
+		if m.FromUsername != "alice" {
+			t.Errorf("msg[%d] from_username = %q, want alice", i, m.FromUsername)
+		}
+		if m.FromRole != "user" {
+			t.Errorf("msg[%d] from_role = %q, want user", i, m.FromRole)
+		}
+	}
 
 	// 2. Query via alias route
 	code, env = doReq(r, http.MethodGet, "/api/v1/messages/hall/history", tokens["bob"])
 	if code != http.StatusOK || env.Code != 0 {
 		t.Fatalf("alias hall history failed: http=%d code=%d", code, env.Code)
+	}
+	var aliasRes HistoryResult
+	if err := json.Unmarshal(env.Data, &aliasRes); err != nil {
+		t.Fatalf("unmarshal alias hall: %v", err)
+	}
+	if len(aliasRes.Messages) != 5 {
+		t.Fatalf("alias hall: expected 5 messages, got %d", len(aliasRes.Messages))
+	}
+	if aliasRes.Messages[0].FromUsername != "alice" || aliasRes.Messages[0].FromRole != "user" {
+		t.Errorf("alias hall sender hydration missing: %+v", aliasRes.Messages[0])
 	}
 
 	// 3. Query with before_seq pagination
@@ -195,11 +217,28 @@ func TestPrivateChatHistory(t *testing.T) {
 	if len(res.Messages) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(res.Messages))
 	}
+	// Sender profile hydration for private history.
+	for i, m := range res.Messages {
+		if m.FromUsername != "alice" {
+			t.Errorf("private msg[%d] from_username = %q, want alice", i, m.FromUsername)
+		}
+		if m.FromRole != "user" {
+			t.Errorf("private msg[%d] from_role = %q, want user", i, m.FromRole)
+		}
+	}
 
 	// 2. Bob queries via alias -> 200
 	code, env = doReq(r, http.MethodGet, "/api/v1/messages/private/"+ids["alice"]+"/history", tokens["bob"])
 	if code != http.StatusOK || env.Code != 0 {
 		t.Fatalf("Bob alias query failed: http=%d code=%d", code, env.Code)
+	}
+	var aliasRes HistoryResult
+	_ = json.Unmarshal(env.Data, &aliasRes)
+	if len(aliasRes.Messages) != 3 {
+		t.Fatalf("alias private: expected 3 messages, got %d", len(aliasRes.Messages))
+	}
+	if aliasRes.Messages[0].FromUsername != "alice" || aliasRes.Messages[0].FromRole != "user" {
+		t.Errorf("alias private sender hydration missing: %+v", aliasRes.Messages[0])
 	}
 
 	// 3. Carol (not participant) queries Alice-Bob history -> 403 Forbidden

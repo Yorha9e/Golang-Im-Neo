@@ -38,13 +38,16 @@ type muteReq struct {
 
 // historyMsg is one chat record in the history window (ascending seq order).
 type historyMsg struct {
-	Seq         int64  `json:"seq"`
-	FromUID     string `json:"from_uid"`
-	Content     string `json:"content"`
-	Extra       string `json:"extra"`
-	Timestamp   int64  `json:"timestamp"`
-	StanzaID    string `json:"stanza_id"`
-	ContentType int8   `json:"content_type"`
+	Seq          int64  `json:"seq"`
+	FromUID      string `json:"from_uid"`
+	FromUsername string `json:"from_username,omitempty"`
+	FromAvatar   string `json:"from_avatar,omitempty"`
+	FromRole     string `json:"from_role,omitempty"`
+	Content      string `json:"content"`
+	Extra        string `json:"extra"`
+	Timestamp    int64  `json:"timestamp"`
+	StanzaID     string `json:"stanza_id"`
+	ContentType  int8   `json:"content_type"`
 }
 
 func ok(c *gin.Context, data interface{}) {
@@ -343,10 +346,30 @@ func handleHistory(svc *GroupService) gin.HandlerFunc {
 			rows = rows[:limit]
 		}
 		// Return messages in ASCENDING seq order inside the array.
+		seen := make(map[string]struct{}, len(rows))
+		uniqueUIDs := make([]string, 0, len(rows))
+		for _, m := range rows {
+			if m.FromUID == "" {
+				continue
+			}
+			if _, ok := seen[m.FromUID]; !ok {
+				seen[m.FromUID] = struct{}{}
+				uniqueUIDs = append(uniqueUIDs, m.FromUID)
+			}
+		}
+		userMap := make(map[string]store.User)
+		if len(uniqueUIDs) > 0 {
+			var users []store.User
+			if err := svc.db.Model(&store.User{}).Select("id, username, avatar_url, role").Where("id IN ?", uniqueUIDs).Find(&users).Error; err == nil {
+				for _, u := range users {
+					userMap[u.ID] = u
+				}
+			}
+		}
 		msgs := make([]historyMsg, 0, len(rows))
 		for i := len(rows) - 1; i >= 0; i-- {
 			m := rows[i]
-			msgs = append(msgs, historyMsg{
+			hm := historyMsg{
 				Seq:         m.Seq,
 				FromUID:     m.FromUID,
 				Content:     m.Content,
@@ -354,7 +377,13 @@ func handleHistory(svc *GroupService) gin.HandlerFunc {
 				Timestamp:   m.Timestamp,
 				StanzaID:    m.StanzaID,
 				ContentType: m.ContentType,
-			})
+			}
+			if u, ok := userMap[m.FromUID]; ok {
+				hm.FromUsername = u.Username
+				hm.FromAvatar = u.AvatarURL
+				hm.FromRole = u.Role
+			}
+			msgs = append(msgs, hm)
 		}
 		ok(c, gin.H{"messages": msgs, "has_more": hasMore})
 	}

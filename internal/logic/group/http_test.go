@@ -262,12 +262,14 @@ func TestGroupHTTPFullFlow(t *testing.T) {
 	}
 	var hist struct {
 		Messages []struct {
-			Seq       int64  `json:"seq"`
-			FromUID   string `json:"from_uid"`
-			Content   string `json:"content"`
-			Extra     string `json:"extra"`
-			Timestamp int64  `json:"timestamp"`
-			StanzaID  string `json:"stanza_id"`
+			Seq          int64  `json:"seq"`
+			FromUID      string `json:"from_uid"`
+			FromUsername string `json:"from_username"`
+			FromRole     string `json:"from_role"`
+			Content      string `json:"content"`
+			Extra        string `json:"extra"`
+			Timestamp    int64  `json:"timestamp"`
+			StanzaID     string `json:"stanza_id"`
 		} `json:"messages"`
 		HasMore bool `json:"has_more"`
 	}
@@ -276,6 +278,15 @@ func TestGroupHTTPFullFlow(t *testing.T) {
 	}
 	if len(hist.Messages) != 2 || !hist.HasMore {
 		t.Fatalf("history window: %+v, want 2 msgs + has_more", hist)
+	}
+	// Sender profile hydration for group history.
+	for i, m := range hist.Messages {
+		if m.FromUsername != "alice" {
+			t.Errorf("group hist msg[%d] from_username = %q, want alice", i, m.FromUsername)
+		}
+		if m.FromRole != "user" {
+			t.Errorf("group hist msg[%d] from_role = %q, want user", i, m.FromRole)
+		}
 	}
 	// Latest window, ascending inside.
 	if hist.Messages[0].Seq != 4 || hist.Messages[1].Seq != 5 {
@@ -394,6 +405,12 @@ func TestGroupHTTPHistoryPagination(t *testing.T) {
 		}
 		if m["from_uid"] != ids["alice"] || m["content"] == "" || m["stanza_id"] == "" {
 			t.Fatalf("message fields missing: %v", m)
+		}
+		if m["from_username"] != "alice" {
+			t.Fatalf("sender hydration missing from_username at %d: %v", i, m)
+		}
+		if m["from_role"] != "user" {
+			t.Fatalf("sender hydration missing from_role at %d: %v", i, m)
 		}
 	}
 	// before_seq window.

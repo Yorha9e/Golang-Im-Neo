@@ -96,14 +96,17 @@ func HTTPStatusOf(code int) int {
 
 // HistoryMessage is one chat record in the history window (ascending seq order).
 type HistoryMessage struct {
-	Seq         int64  `json:"seq"`
-	FromUID     string `json:"from_uid"`
-	ToUID       string `json:"to_uid"`
-	Content     string `json:"content"`
-	Extra       string `json:"extra"`
-	Timestamp   int64  `json:"timestamp"`
-	StanzaID    string `json:"stanza_id"`
-	ContentType int8   `json:"content_type"`
+	Seq          int64  `json:"seq"`
+	FromUID      string `json:"from_uid"`
+	FromUsername string `json:"from_username,omitempty"`
+	FromAvatar   string `json:"from_avatar,omitempty"`
+	FromRole     string `json:"from_role,omitempty"`
+	ToUID        string `json:"to_uid"`
+	Content      string `json:"content"`
+	Extra        string `json:"extra"`
+	Timestamp    int64  `json:"timestamp"`
+	StanzaID     string `json:"stanza_id"`
+	ContentType  int8   `json:"content_type"`
 }
 
 // HistoryResult is the paged history window.
@@ -255,6 +258,39 @@ func (s *MessageService) GetHistory(me, covID string, beforeSeq int64, limit int
 	return nil, NewMessageError(CodeParamInvalid, "invalid cov_id")
 }
 
+// hydrateSenders loads sender profiles for the given from_uid values.
+// It collects unique non-empty ids, queries users in one batch, and builds
+// a map keyed by user id. Missing users are simply absent from the map;
+// DB errors yield an empty (non-nil) map so callers still return messages.
+func (s *MessageService) hydrateSenders(fromUIDs []string) map[string]store.User {
+	userMap := make(map[string]store.User)
+	if len(fromUIDs) == 0 {
+		return userMap
+	}
+	seen := make(map[string]struct{}, len(fromUIDs))
+	uniqueUIDs := make([]string, 0, len(fromUIDs))
+	for _, id := range fromUIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			uniqueUIDs = append(uniqueUIDs, id)
+		}
+	}
+	if len(uniqueUIDs) == 0 {
+		return userMap
+	}
+	var users []store.User
+	if err := s.db.Model(&store.User{}).Select("id, username, avatar_url, role").Where("id IN ?", uniqueUIDs).Find(&users).Error; err != nil {
+		return userMap
+	}
+	for _, u := range users {
+		userMap[u.ID] = u
+	}
+	return userMap
+}
+
 // queryCov runs the canonical window query for a single cov_id.
 func (s *MessageService) queryCov(covID string, beforeSeq int64, limit int) (*HistoryResult, error) {
 	q := s.db.Model(&store.Message{}).Where("cov_id = ?", covID)
@@ -269,10 +305,15 @@ func (s *MessageService) queryCov(covID string, beforeSeq int64, limit int) (*Hi
 	if hasMore {
 		rows = rows[:limit]
 	}
+	fromUIDs := make([]string, 0, len(rows))
+	for _, m := range rows {
+		fromUIDs = append(fromUIDs, m.FromUID)
+	}
+	userMap := s.hydrateSenders(fromUIDs)
 	msgs := make([]HistoryMessage, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
 		m := rows[i]
-		msgs = append(msgs, HistoryMessage{
+		hm := HistoryMessage{
 			Seq:         m.Seq,
 			FromUID:     m.FromUID,
 			ToUID:       m.ToUID,
@@ -281,7 +322,13 @@ func (s *MessageService) queryCov(covID string, beforeSeq int64, limit int) (*Hi
 			Timestamp:   m.Timestamp,
 			StanzaID:    m.StanzaID,
 			ContentType: m.ContentType,
-		})
+		}
+		if u, ok := userMap[m.FromUID]; ok {
+			hm.FromUsername = u.Username
+			hm.FromAvatar = u.AvatarURL
+			hm.FromRole = u.Role
+		}
+		msgs = append(msgs, hm)
 	}
 	return &HistoryResult{Messages: msgs, HasMore: hasMore}, nil
 }
@@ -300,10 +347,15 @@ func (s *MessageService) queryHall(beforeSeq int64, limit int) (*HistoryResult, 
 	if hasMore {
 		rows = rows[:limit]
 	}
+	fromUIDs := make([]string, 0, len(rows))
+	for _, m := range rows {
+		fromUIDs = append(fromUIDs, m.FromUID)
+	}
+	userMap := s.hydrateSenders(fromUIDs)
 	msgs := make([]HistoryMessage, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
 		m := rows[i]
-		msgs = append(msgs, HistoryMessage{
+		hm := HistoryMessage{
 			Seq:         m.Seq,
 			FromUID:     m.FromUID,
 			ToUID:       m.ToUID,
@@ -312,7 +364,13 @@ func (s *MessageService) queryHall(beforeSeq int64, limit int) (*HistoryResult, 
 			Timestamp:   m.Timestamp,
 			StanzaID:    m.StanzaID,
 			ContentType: m.ContentType,
-		})
+		}
+		if u, ok := userMap[m.FromUID]; ok {
+			hm.FromUsername = u.Username
+			hm.FromAvatar = u.AvatarURL
+			hm.FromRole = u.Role
+		}
+		msgs = append(msgs, hm)
 	}
 	return &HistoryResult{Messages: msgs, HasMore: hasMore}, nil
 }
