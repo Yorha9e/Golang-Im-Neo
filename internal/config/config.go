@@ -51,6 +51,7 @@ type AdminConfig struct {
 // ".jpg,.jpeg,.png,.gif,.webp".
 type MediaConfig struct {
 	StorageDir        string `toml:"storage_dir"`
+	CDNBaseURL        string `toml:"cdn_base_url"` // Optional CDN base URL, e.g. "https://img.yourdomain.com"
 	MaxAvatarBytes    int64  `toml:"max_avatar_bytes"`
 	MaxFileBytes      int64  `toml:"max_file_bytes"`
 	AllowedAvatarExts string `toml:"allowed_avatar_exts"`

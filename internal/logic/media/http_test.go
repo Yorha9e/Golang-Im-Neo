@@ -165,6 +165,14 @@ func TestHTTPPublicReadableAnonymously(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "image/png") {
 		t.Fatalf("public Content-Type = %q, want image/png", ct)
 	}
+	// Verify CDN / edge caching headers on public asset
+	cc := rec.Header().Get("Cache-Control")
+	if !strings.Contains(cc, "public") || !strings.Contains(cc, "immutable") {
+		t.Fatalf("public Cache-Control = %q, want public, max-age=2592000, immutable", cc)
+	}
+	if etag := rec.Header().Get("ETag"); etag == "" {
+		t.Fatal("public ETag missing")
+	}
 }
 
 func TestHTTPPrivateAccessIsolation(t *testing.T) {

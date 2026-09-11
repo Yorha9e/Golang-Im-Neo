@@ -8,6 +8,7 @@
 package media
 
 import (
+	"fmt"
 	"mime"
 	"net/http"
 	"os"
@@ -97,6 +98,12 @@ func handleGet(svc *MediaService, jwtMW gin.HandlerFunc) gin.HandlerFunc {
 			return
 		}
 		c.Header("Content-Type", contentTypeForExt(asset.FileExt))
+		if asset.AccessLevel == "public" {
+			c.Header("Cache-Control", "public, max-age=2592000, immutable")
+			if asset.FileSHA256 != "" {
+				c.Header("ETag", fmt.Sprintf(`"%s"`, asset.FileSHA256))
+			}
+		}
 		c.File(p)
 	}
 }

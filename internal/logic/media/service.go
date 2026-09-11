@@ -136,6 +136,13 @@ func (s *MediaService) fileExtList() string {
 	return config.DefaultAllowedFileExts
 }
 
+func (s *MediaService) cdnBaseURL() string {
+	if s.cfg != nil {
+		return strings.TrimSpace(s.cfg.Media.CDNBaseURL)
+	}
+	return ""
+}
+
 // parseExtList normalizes a comma-separated ext list into a lookup set.
 // Entries are lower-cased and dot-prefixed (bare "png" becomes ".png").
 func parseExtList(list string) map[string]bool {
@@ -248,6 +255,10 @@ func (s *MediaService) Upload(uploaderID, mediaType, accessLevel string, fh *mul
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		return nil, NewMediaError(CodeInternalServer, "failed to store media file")
 	}
+	accessURL := "/api/v1/media/" + mid
+	if cdn := strings.TrimRight(s.cdnBaseURL(), "/"); cdn != "" {
+		accessURL = cdn + "/api/v1/media/" + mid
+	}
 	asset := &store.MediaAsset{
 		MID:         mid,
 		UploaderID:  uploaderID,
@@ -257,7 +268,7 @@ func (s *MediaService) Upload(uploaderID, mediaType, accessLevel string, fh *mul
 		FileExt:     ext,
 		FileSHA256:  shaHex,
 		StoragePath: dst,
-		AccessURL:   "/api/v1/media/" + mid,
+		AccessURL:   accessURL,
 	}
 	if err := s.db.Create(asset).Error; err != nil {
 		_ = os.Remove(dst)

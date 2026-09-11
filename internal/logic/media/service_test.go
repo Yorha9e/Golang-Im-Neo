@@ -318,3 +318,26 @@ func TestResolvePathTraversalGuard(t *testing.T) {
 		t.Fatalf("absolute outside path: got %v, want 50001", err)
 	}
 }
+
+func TestCDNBaseURLPrefix(t *testing.T) {
+	svc, _, cfg := newTestMediaService(t)
+	// 1. Default empty CDNBaseURL -> relative URL
+	a1, err := svc.Upload("u_alice", "image", "public", fileHeaderFor(t, "cdn1.png", []byte("cdn1-bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(a1.AccessURL, "/api/v1/media/") {
+		t.Fatalf("expected relative access_url, got %q", a1.AccessURL)
+	}
+
+	// 2. Set CDNBaseURL -> absolute CDN URL
+	cfg.Media.CDNBaseURL = "https://img.yourdomain.com"
+	a2, err := svc.Upload("u_alice", "image", "public", fileHeaderFor(t, "cdn2.png", []byte("cdn2-bytes")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedPrefix := "https://img.yourdomain.com/api/v1/media/"
+	if !strings.HasPrefix(a2.AccessURL, expectedPrefix) {
+		t.Fatalf("expected CDN access_url prefix %q, got %q", expectedPrefix, a2.AccessURL)
+	}
+}
