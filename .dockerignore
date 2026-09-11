@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Local data & temporary files
+data/
+*.db
+*.db-wal
+*.db-shm
+.imcli-*.json
+*.log
+
+# Frontend source and node_modules (frontend build artifacts are copied separately)
+frontend/node_modules
+frontend/src
+
+# Documentation and plan files
+docs/
+plans/
+.omkc/
+.kimi-code/
+scripts/
+
+# OS specific files
+.DS_Store
+Thumbs.db
