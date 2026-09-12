@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../../store';
 import { profileApi, mediaApi, UserProfile, PostItem } from '../../api';
 import { RoleBadge } from '../common/RoleBadge';
+import { formatMediaUrl } from '../../utils/media';
 import {
   User,
   Edit3,
@@ -176,7 +177,7 @@ export const ProfileView: React.FC = () => {
   const postList = profile?.posts || [];
 
   return (
-    <div className="flex-1 h-full overflow-y-auto bg-[#FAF8F5] p-3.5 sm:p-6 lg:p-10 pb-[calc(2rem+env(safe-area-inset-bottom,0px))] select-none">
+    <div className="flex-1 h-full overflow-y-auto bg-[#FAF8F5] p-3.5 sm:p-6 lg:p-10 pb-32 select-none">
       <div className="max-w-4xl mx-auto space-y-5 sm:space-y-8">
         {/* 1. 个人资料顶部看板 */}
         <motion.div
@@ -199,7 +200,7 @@ export const ProfileView: React.FC = () => {
               />
               <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] flex items-center justify-center text-white text-3xl font-bold shadow-walnut-glow overflow-hidden">
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="头像" className="w-full h-full object-cover" />
+                  <img src={formatMediaUrl(avatarUrl)} alt="头像" className="w-full h-full object-cover" />
                 ) : (
                   username.slice(0, 1).toUpperCase()
                 )}
@@ -449,11 +450,11 @@ export const ProfileView: React.FC = () => {
                   {/* 图文模式配图 (自适应完整展示 + 点击全屏灯箱) */}
                   {post.media_url && (
                     <div
-                      onClick={() => setLightboxUrl(post.media_url!)}
+                      onClick={() => setLightboxUrl(formatMediaUrl(post.media_url!))}
                       className="rounded-2xl overflow-hidden border border-[#C9B99A]/30 bg-[#F0EBE3]/50 flex items-center justify-center cursor-zoom-in group/img transition-all hover:border-[#8B7355]/60 hover:shadow-warm-md p-1"
                     >
                       <img
-                        src={post.media_url}
+                        src={formatMediaUrl(post.media_url)}
                         alt="动态配图"
                         className="w-full max-h-[420px] object-contain rounded-xl transition-transform group-hover/img:scale-[1.01]"
                       />

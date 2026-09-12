@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { profileApi, UserProfile } from '../../api';
 import { useAuthStore, useFriendStore, useChatStore } from '../../store';
 import { RoleBadge } from '../common/RoleBadge';
+import { formatMediaUrl } from '../../utils/media';
 import {
   X,
   Sparkles,
@@ -111,7 +112,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="flex items-start gap-4 pb-5 border-b border-[#C9B99A]/30 shrink-0 pr-8">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] text-white flex items-center justify-center text-2xl font-bold shadow-walnut-glow overflow-hidden shrink-0">
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="头像" className="w-full h-full object-cover" />
+                  <img src={formatMediaUrl(avatarUrl)} alt="头像" className="w-full h-full object-cover" />
                 ) : (
                   username.slice(0, 1).toUpperCase()
                 )}
@@ -190,11 +191,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     {/* 配图 */}
                     {post.media_url && (
                       <div
-                        onClick={() => setLightboxUrl(post.media_url!)}
+                        onClick={() => setLightboxUrl(formatMediaUrl(post.media_url!))}
                         className="rounded-xl overflow-hidden border border-[#C9B99A]/30 bg-[#F0EBE3]/50 flex items-center justify-center cursor-zoom-in group/img p-1 transition-all hover:border-[#8B7355]/60"
                       >
                         <img
-                          src={post.media_url}
+                          src={formatMediaUrl(post.media_url)}
                           alt="动态图"
                           className="w-full max-h-[320px] object-contain rounded-lg transition-transform group-hover/img:scale-[1.01]"
                         />

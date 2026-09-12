@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Golang IM Neo</string>
+    <string name="title_activity_main">Golang IM Neo</string>
+    <string name="package_name">com.neo.golangim</string>
+    <string name="custom_url_scheme">com.neo.golangim</string>
+</resources>

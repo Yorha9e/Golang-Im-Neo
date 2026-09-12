@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 全局基础信任链：信任系统根、用户根以及我们内嵌的自签证书公钥 -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+            <certificates src="@raw/server" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- 生产环境公网 IP 专属域名信任固定 (SSL Pinning) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">106.52.170.56</domain>
+        <trust-anchors>
+            <certificates src="@raw/server" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- 本地虚拟开发域放行 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

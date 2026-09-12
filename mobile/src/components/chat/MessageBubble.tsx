@@ -5,6 +5,7 @@ import { MsgType } from '../../proto/message';
 import { Check, AlertCircle, Loader2, Radio, Sparkles } from 'lucide-react';
 import { AudioBubble } from './AudioBubble';
 import { RoleBadge } from '../common/RoleBadge';
+import { formatMediaUrl } from '../../utils/media';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -81,7 +82,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] flex items-center justify-center font-bold text-xs text-[#FAF8F5] shadow-warm-sm shrink-0 cursor-pointer hover:scale-105 hover:shadow-walnut-glow transition-all select-none overflow-hidden"
         >
           {from_avatar ? (
-            <img src={from_avatar} alt="头像" className="w-full h-full object-cover" />
+            <img src={formatMediaUrl(from_avatar)} alt="头像" className="w-full h-full object-cover" />
           ) : (
             displayName.slice(0, 1).toUpperCase()
           )}
@@ -113,7 +114,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {/* 1. 语音消息气泡 */}
           {mediaMeta && mediaMeta.type === 'voice' && mediaMeta.url ? (
             <AudioBubble
-              audioUrl={mediaMeta.url}
+              audioUrl={formatMediaUrl(mediaMeta.url)}
               duration={mediaMeta.duration || 5}
               peaks={mediaMeta.peaks || [0.3, 0.6, 0.9, 0.4, 0.7, 0.5, 0.8, 0.3, 0.6, 0.4]}
               isSelf={isSelf}
@@ -122,7 +123,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             /* 2. 视频消息气泡 */
             <div className="space-y-1">
               <video
-                src={mediaMeta.url}
+                src={formatMediaUrl(mediaMeta.url)}
                 controls
                 className="rounded-xl max-h-60 max-w-xs object-contain bg-black/20"
               />
@@ -134,9 +135,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             /* 3. 图片消息气泡 */
             <div className="space-y-1">
               <img
-                src={mediaMeta.url}
+                src={formatMediaUrl(mediaMeta.url)}
                 alt="图片消息"
-                onClick={() => onPreviewImage?.(mediaMeta!.url!)}
+                onClick={() => onPreviewImage?.(formatMediaUrl(mediaMeta!.url!))}
                 className="rounded-xl max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity"
               />
               {content && content !== '[图片]' && (
@@ -183,7 +184,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {isSelf && (
         <div className="w-8 h-8 rounded-xl bg-[#8B7355] flex items-center justify-center font-bold text-xs text-[#FAF8F5] shadow-warm-sm shrink-0 select-none overflow-hidden">
           {myAvatar ? (
-            <img src={myAvatar} alt="我的头像" className="w-full h-full object-cover" />
+            <img src={formatMediaUrl(myAvatar)} alt="我的头像" className="w-full h-full object-cover" />
           ) : (
             '我'
           )}

@@ -1,0 +1,18 @@
+{
+  "name": "Golang IM Neo 专属移动端",
+  "short_name": "Neo IM",
+  "description": "Warm Sand 暖沙流体引力场即时通讯客户端",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF8F5",
+  "theme_color": "#FAF8F5",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

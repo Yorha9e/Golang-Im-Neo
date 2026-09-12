@@ -164,6 +164,66 @@ class SoundEffectsEngine {
       osc.stop(now + 0.09);
     } catch (err) {}
   }
+
+  /**
+   * 微触觉触控滴答声 (Subtle Haptic Tick)
+   */
+  public playHapticTick() {
+    const { soundEnabled, soundVolume } = useAudioStore.getState();
+    if (!soundEnabled) return;
+
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1800, now);
+      osc.frequency.exponentialRampToValueAtTime(300, now + 0.025);
+
+      gain.gain.setValueAtTime(0.08 * soundVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.025);
+    } catch (err) {}
+  }
+
+  /**
+   * 爆发行动扇形展开音效 (Burst Action Fan-out)
+   */
+  public playBurstOpen() {
+    const { soundEnabled, soundVolume } = useAudioStore.getState();
+    if (!soundEnabled) return;
+
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(350, now);
+      osc.frequency.exponentialRampToValueAtTime(750, now + 0.06);
+
+      gain.gain.setValueAtTime(0.12 * soundVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.07);
+    } catch (err) {}
+  }
 }
 
 export const soundEffects = new SoundEffectsEngine();

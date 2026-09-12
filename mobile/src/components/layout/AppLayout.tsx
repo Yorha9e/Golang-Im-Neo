@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuthStore, useAudioStore, useFriendStore, useChatStore } from '../../store';
 import { wsClient, ConnectionStatus } from '../../socket/wsClient';
 import { RoleBadge } from '../common/RoleBadge';
+import { formatMediaUrl } from '../../utils/media';
 import {
   Sparkles,
   Volume2,
@@ -178,7 +179,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <div className="flex items-center gap-1.5 pl-1.5 sm:pl-2 border-l border-[#C9B99A]/30 shrink-0">
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-gradient-to-br from-[#C9B99A] to-[#8B7355] flex items-center justify-center text-[#FAF8F5] font-bold text-xs shadow-warm-sm overflow-hidden shrink-0">
               {avatarUrl ? (
-                <img src={avatarUrl} alt="头像" className="w-full h-full object-cover" />
+                <img src={formatMediaUrl(avatarUrl)} alt="头像" className="w-full h-full object-cover" />
               ) : (
                 username.slice(0, 1).toUpperCase()
               )}

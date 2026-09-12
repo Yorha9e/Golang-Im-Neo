@@ -6,6 +6,7 @@ import {
   useAuthStore,
 } from '../../store';
 import { friendApi, FriendItem } from '../../api';
+import { formatMediaUrl } from '../../utils/media';
 import {
   MessageSquare,
   Users,
@@ -406,7 +407,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <div className="relative shrink-0">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#C9B99A] to-[#8B7355] flex items-center justify-center font-bold text-sm text-[#FAF8F5] overflow-hidden shadow-warm-sm">
                           {friend.avatar_url ? (
-                            <img src={friend.avatar_url} alt="头像" className="w-full h-full object-cover" />
+                            <img src={formatMediaUrl(friend.avatar_url)} alt="头像" className="w-full h-full object-cover" />
                           ) : (
                             friend.username.slice(0, 1).toUpperCase()
                           )}
