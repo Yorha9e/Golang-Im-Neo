@@ -75,10 +75,15 @@ class WebSocketClient {
 
       const ticket = ticketRes.data.ticket;
       
-      // 2. 拼接 WS 协议地址 (兼容开发代理与生产同源)
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws?ticket=${encodeURIComponent(ticket)}`;
+      // 2. 拼接 WS 协议地址 (兼容开发代理、生产同源与客户端直连)
+      let wsUrl = '';
+      if (typeof window !== 'undefined' && (window.location.protocol === 'file:' || (window as any).electronAPI?.isElectron)) {
+        wsUrl = `wss://106.52.170.56:8080/ws?ticket=${encodeURIComponent(ticket)}`;
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        wsUrl = `${protocol}//${host}/ws?ticket=${encodeURIComponent(ticket)}`;
+      }
 
       this.ws = new WebSocket(wsUrl);
       this.ws.binaryType = 'arraybuffer';

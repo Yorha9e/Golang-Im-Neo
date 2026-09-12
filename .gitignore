@@ -34,7 +34,14 @@ Thumbs.db
 # Logs
 *.log
 
-# Frontend
+# Frontend & Mobile
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+mobile/node_modules/
+mobile/dist/
+mobile/.vite/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+*.tar.gz

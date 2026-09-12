@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Warm Sand 调色板 */
+  --color-warm-sand-cream: #FAF8F5; /* Cream 全局柔光主底色 */
+  --color-warm-sand-sand: #F0EBE3;  /* Sand 侧边栏/次级卡片底色 */
+  --color-warm-sand-wheat: #C9B99A; /* Wheat 麦金点缀/微边框/波形高亮 */
+  --color-warm-sand-walnut: #8B7355;/* Walnut 核心主调/我方气泡/强调 */
+  --color-warm-sand-dark: #4A3B2C;  /* 深色正文 */
+  --color-warm-sand-darker: #2E2419;/* 极深标题 */
+
+  /* 语义角色映射 */
+  --theme-bg: var(--color-warm-sand-cream);
+  --theme-primary: var(--color-warm-sand-sand);
+  --theme-accent: var(--color-warm-sand-wheat);
+  --theme-surface: var(--color-warm-sand-walnut);
+}
+
+@layer base {
+  * {
+    border-color: rgba(201, 185, 154, 0.35);
+  }
+  
+  body {
+    background-color: var(--theme-bg);
+    color: var(--color-warm-sand-dark);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* 精致暖沙滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(201, 185, 154, 0.4);
+  border-radius: 9999px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 115, 85, 0.6);
+}
+
+/* Warm Sand 毛玻璃类 */
+.glass-panel {
+  background: rgba(240, 235, 227, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(201, 185, 154, 0.45);
+}
+
+.glass-card {
+  background: rgba(250, 248, 245, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(201, 185, 154, 0.35);
+}
+
+.glass-input {
+  background: rgba(250, 248, 245, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(201, 185, 154, 0.5);
+}
+
+.glass-input:focus {
+  border-color: #8B7355;
+  box-shadow: 0 0 0 3px rgba(201, 185, 154, 0.25);
+}
+
+/* 动效波形条呼吸动画 */
+@keyframes wave-pulse {
+  0%, 100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.animate-wave {
+  animation: wave-pulse 1.2s ease-in-out infinite;
+}

@@ -6,10 +6,12 @@ export interface ApiResponse<T = any> {
   data: T;
 }
 
-const API_BASE_URL = '/api/v1';
+export const getApiBaseUrl = (): string => {
+  return '/api/v1';
+};
 
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getApiBaseUrl(),
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -166,7 +168,8 @@ async function handleUnauthorized(originalRequest: any) {
   }
 
   try {
-    const { data } = await axios.post<ApiResponse<{ access_token: string }>>('/api/v1/auth/refresh', {
+    const refreshUrl = `${getApiBaseUrl()}/auth/refresh`;
+    const { data } = await axios.post<ApiResponse<{ access_token: string }>>(refreshUrl, {
       refresh_token: refreshToken,
       session_id: sessionId,
     });

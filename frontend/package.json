@@ -3,10 +3,15 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "electron electron/main.cjs --dev",
+    "electron:start": "electron electron/main.cjs",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:open:android": "npx cap open android"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -20,11 +25,15 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "electron": "^44.3.0",
     "postcss": "^8.5.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3",

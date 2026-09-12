@@ -21,11 +21,11 @@ services:
     networks:
       - im-internal
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || wget -q --spider http://127.0.0.1:8080/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 3
-      start_period: 5s
+      start_period: 15s
 
   # -------------------------------------------------------------
   # 2. 边缘防护网关 (Nginx Alpine)
@@ -38,13 +38,15 @@ services:
     environment:
       - TZ=Asia/Shanghai
     ports:
-      # 对外暴露端口：默认为 8080，可通过环境变量或修改此处调整
-      - "${PORT:-8080}:80"
+      # 对外暴露端口：默认为 8080，映射到内部 Nginx SSL 443 端口
+      - "${PORT:-8080}:443"
     volumes:
       # 挂载自定义安全配置
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       # 挂载编译好的前端产物 (静态托管，零 Node 进程消耗)
       - ./frontend/dist:/usr/share/nginx/html:ro
+      # 挂载 SSL 自签/CA 证书目录
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       im-backend:
         condition: service_healthy

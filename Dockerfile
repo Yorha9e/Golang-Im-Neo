@@ -24,9 +24,9 @@ RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
 # ==========================================
 FROM alpine:3.19
 
-# 国内网络加速：配置 Alpine 国内镜像源
+# 国内网络加速：配置 Alpine 国内镜像源与必要运行时工具 (含 curl 用于标准健康检查)
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && apk add --no-cache ca-certificates tzdata \
+    && apk add --no-cache ca-certificates tzdata curl \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 
@@ -35,6 +35,7 @@ WORKDIR /app
 # 从构建阶段复制编译好的独立二进制程序
 COPY --from=builder /build/server /app/server
 COPY config.toml /app/config.toml
+COPY web /app/web
 
 # 预创建持久化数据目录与媒体目录
 RUN mkdir -p /app/data/media
