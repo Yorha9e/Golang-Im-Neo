@@ -10,8 +10,44 @@
     "preview": "vite preview",
     "electron:dev": "electron electron/main.cjs --dev",
     "electron:start": "electron electron/main.cjs",
+    "electron:dist": "npm run build && electron-builder --win",
     "cap:sync": "npm run build && npx cap sync",
     "cap:open:android": "npx cap open android"
+  },
+  "build": {
+    "appId": "com.golangim.neo",
+    "productName": "Golang-IM-Neo",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Golang IM Neo"
+    }
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -34,6 +70,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.5.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3",

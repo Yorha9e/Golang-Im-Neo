@@ -33,10 +33,11 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
 };
 
-// 启动极轻量本地静态托管与云端 API 反代服务
+// 启动极轻量本地静态托管与云端 API 反代服务 (绑定固定端口以永久固化 localStorage 登录态)
 function startLocalServer() {
   return new Promise((resolve) => {
     const distDir = path.join(__dirname, '../dist');
+    const FIXED_PORT = 28080;
 
     localServer = http.createServer((req, res) => {
       // 1. API 与多媒体反向代理到云端真机
@@ -94,10 +95,20 @@ function startLocalServer() {
       });
     });
 
-    localServer.listen(0, '127.0.0.1', () => {
-      localPort = localServer.address().port;
-      console.log(`🚀 [Embedded Server] 本地网关已就绪: http://127.0.0.1:${localPort}`);
-      resolve(localPort);
+    localServer.on('error', (e) => {
+      if (e.code === 'EADDRINUSE') {
+        console.warn(`⚠️ 端口 ${FIXED_PORT} 被占用，随机分配空闲端口`);
+        localServer.listen(0, '127.0.0.1', () => {
+          localPort = localServer.address().port;
+          resolve(localPort);
+        });
+      }
+    });
+
+    localServer.listen(FIXED_PORT, '127.0.0.1', () => {
+      localPort = FIXED_PORT;
+      console.log(`🚀 [Embedded Server] 本地固定网关已就绪 (登录态永久固化): http://127.0.0.1:${FIXED_PORT}`);
+      resolve(FIXED_PORT);
     });
   });
 }
@@ -118,6 +129,7 @@ async function createWindow() {
       contextIsolation: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      partition: 'persist:golang-im-neo',
     },
   });
 

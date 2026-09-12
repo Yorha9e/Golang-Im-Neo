@@ -37,6 +37,8 @@ Thumbs.db
 # Frontend & Mobile
 frontend/node_modules/
 frontend/dist/
+frontend/release/
+release/
 frontend/.vite/
 mobile/node_modules/
 mobile/dist/
@@ -45,3 +47,8 @@ frontend/android/.gradle/
 frontend/android/build/
 frontend/android/app/build/
 *.tar.gz
+
+# SSL Keys & Secrets
+*.key
+*.pem
+/nginx/ssl/
