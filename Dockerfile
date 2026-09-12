@@ -3,8 +3,11 @@
 # ==========================================
 FROM golang:1.22-alpine AS builder
 
-# 安装 gcc 和 musl-dev (支持 SQLite3 CGO 编译)
-RUN apk add --no-cache gcc musl-dev
+# 国内网络加速：配置 Alpine 国内镜像源与 Go 模块国内代理
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache gcc musl-dev
+
+ENV GOPROXY=https://goproxy.cn,direct
 
 WORKDIR /build
 
@@ -21,8 +24,9 @@ RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o server ./cmd/server
 # ==========================================
 FROM alpine:3.19
 
-# 安装 SSL CA 根证书与时区数据
-RUN apk add --no-cache ca-certificates tzdata \
+# 国内网络加速：配置 Alpine 国内镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 
