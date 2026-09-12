@@ -3,7 +3,7 @@ host = "0.0.0.0"
 port = 8080
 read_timeout = "30s"
 write_timeout = "30s"
-mode = "debug"
+mode = "release"
 
 [security]
 jwt_secret = "change-me-in-production-32chars-long-secret"

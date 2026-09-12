@@ -85,13 +85,16 @@ func defaultCheckOrigin(r *http.Request) bool {
 	case "localhost", "127.0.0.1", "::1":
 		return true
 	}
-	// [LAN-DEBUG-FLAG] Allow LAN / private IP ranges (10.x.x.x, 172.16-31.x.x, 192.168.x.x, etc.) for local & LAN testing.
-	// NOTE: Remove/disable this block before production or strict device deployment if LAN Origin wildcarding should be restricted.
+	// [LAN-DEBUG-FLAG] Local & LAN multi-device debugging toggle:
+	// To re-enable LAN/private IP wildcarding (10.x, 172.16-31.x, 192.168.x) for offline testing,
+	// simply uncomment the block below. Disabled by default for production & security penetration testing.
+	/*
 	if ip := net.ParseIP(originHost); ip != nil {
 		if ip.IsPrivate() || ip.IsLoopback() {
 			return true
 		}
 	}
+	*/
 	return false
 }
 
