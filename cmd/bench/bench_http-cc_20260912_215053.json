@@ -1,0 +1,23 @@
+{
+  "concurrency": 30,
+  "duration_seconds": 0.82,
+  "effective_qps": 156.99,
+  "failed": 172,
+  "latency_ms": {
+    "avg": 80.231,
+    "max": 332.461,
+    "min": 43.133,
+    "p50": 53.85,
+    "p90": 80.025,
+    "p95": 326.048,
+    "p99": 328.328
+  },
+  "mode": "http-cc",
+  "nginx_cc_intercept_503": 172,
+  "overall_qps": 367.95,
+  "success_rate_pct": 42.67,
+  "successful": 128,
+  "target": "https://106.52.170.56:8080",
+  "timestamp": "2026-09-12T21:50:53+08:00",
+  "total_requests": 300
+}

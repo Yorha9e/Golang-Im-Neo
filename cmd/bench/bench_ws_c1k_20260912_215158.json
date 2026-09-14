@@ -1,0 +1,12 @@
+{
+  "avg_conn_setup_ms": 38.77,
+  "establishment_duration_s": 1.94,
+  "failed": 21,
+  "holding_duration": "5s",
+  "mode": "ws-c1k",
+  "success_rate_pct": 58,
+  "successfully_held": 29,
+  "target": "https://106.52.170.56:8080",
+  "target_concurrency": 50,
+  "timestamp": "2026-09-12T21:51:58+08:00"
+}

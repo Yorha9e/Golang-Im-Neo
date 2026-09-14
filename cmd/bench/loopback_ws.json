@@ -1,0 +1,23 @@
+{
+  "concurrency": 20,
+  "duration_seconds": 6.43,
+  "effective_qps": 149.2,
+  "failed": 40,
+  "latency_ms": {
+    "avg": 128.507,
+    "max": 3000,
+    "min": 2.477,
+    "p50": 8.388,
+    "p90": 13.11,
+    "p95": 21.675,
+    "p99": 3000
+  },
+  "mode": "ws-msg",
+  "nginx_cc_intercept_503": 0,
+  "overall_qps": 155.41,
+  "success_rate_pct": 96,
+  "successful": 960,
+  "target": "https://127.0.0.1:8080",
+  "timestamp": "2026-09-12T22:00:17+08:00",
+  "total_requests": 1000
+}

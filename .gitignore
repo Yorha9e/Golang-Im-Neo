@@ -6,6 +6,8 @@
 /bin/
 /cmd/server/server
 /cmd/client/client
+/cmd/bench/bench
+/bench
 
 # Data & DB
 /data/
