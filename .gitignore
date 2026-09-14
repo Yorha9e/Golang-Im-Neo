@@ -54,3 +54,6 @@ frontend/android/app/build/
 *.key
 *.pem
 /nginx/ssl/
+
+# Local-only design docs (kept on disk, never pushed to the public remote)
+/docs/
