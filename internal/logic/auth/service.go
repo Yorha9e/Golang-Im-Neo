@@ -1,8 +1,8 @@
 // Package auth implements the account & security layer (Stage-1 M2).
 //
-// SSOT: docs/TECH_SELECTION_AND_CONTRACTS.md §2.1 (auth endpoints + envelope)
-// and §3 (error codes); docs/DATABASE_DESIGN_SPEC.md §2.1 (users) / §2.2
-// (user_sessions); docs/DECOUPLED_ARCHITECTURE_SPEC.md 层级4.
+// SSOT: auth endpoints contract + response envelope and the shared
+// error-code table; the users / user_sessions schemas; layer-4 domain
+// service boundaries.
 //
 // service.go holds the pure business logic: no gin imports here. The HTTP
 // adapter lives in http.go; the one-time WS handshake ticket in ticket.go.

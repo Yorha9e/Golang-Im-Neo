@@ -1,9 +1,8 @@
 // Package router implements the Stage-1 routing & dispatch layer (MISSION M4).
 //
-// SSOT: docs/DECOUPLED_ARCHITECTURE_SPEC.md 层级3 (Router, RelayStrategy,
-// Interceptor chain §3.2), docs/VULNERABILITIES_AND_FIXES.md 漏洞1 (immediate
-// seq+ACK) + 漏洞6 (sliding dedup window), docs/TECH_STACK_SPECIFICATION.md
-// 机制2 (ACK闭环) + 机制3 (covId 规范序).
+// SSOT: layer-3 routing design (Router, RelayStrategy, interceptor chain),
+// the immediate-seq+ACK and sliding-dedup-window invariants, and the
+// ACK-close-loop + canonical covId ordering mechanisms.
 //
 // Pipeline per inbound frame:
 //
@@ -17,7 +16,7 @@ import (
 	"golang-im-neo-system/internal/store"
 )
 
-// SSOT error codes (docs/TECH_SELECTION_AND_CONTRACTS.md). Only codes pinned
+// SSOT error codes. Only codes pinned
 // by the SSOT table are emitted in SYSTEM_NOTICE Extra payloads; all other
 // router notices carry a human-readable Content with no code.
 const (

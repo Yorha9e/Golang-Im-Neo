@@ -31,4 +31,21 @@ protoc --go_out=. --go_opt=paths=source_relative proto/message.proto
 
 ## 目录结构
 
-见 `docs/TECH_STACK_SPECIFICATION.md` 与 `docs/DATABASE_DESIGN_SPEC.md`
+```text
+cmd/server/      服务端启动入口
+internal/
+  handshake/     [L1] 协议升级、Ticket 核销、Origin 校验
+  gateway/       [L2] 32 分片连接池、读写泵、心跳、背压、硬件截断
+  router/        [L3] 消息调度、Relay/P2P 策略、拦截器链
+  logic/         [L4] 纯业务领域服务 (auth/user/friend/group/media/
+                 message/profile/session/admin)
+  store/         [L5] Repository、SQLite WAL、异步批量落盘
+  middleware/    HTTP 中间件 (JWT, AdminAuth, CORS, Recovery)
+  config/        config.toml 解析与种子管理员注入
+proto/           消息协议 Protobuf 定义及生成代码 (SSOT)
+esp32/           ESP-IDF 硬件客户端原型工程
+frontend/        React / TypeScript 桌面 Web 工程
+mobile/          Capacitor 移动端工程
+nginx/           Nginx 防护网关配置
+landing/         项目介绍页 (GitHub Pages)
+```

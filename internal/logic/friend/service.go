@@ -1,8 +1,8 @@
 // Package friend implements the friend-system business logic (M1).
 //
-// SSOT: docs/TECH_SELECTION_AND_CONTRACTS.md §2.2 (endpoints) and §3
-// (error codes); storage is the physical bidirectional double-row
-// friendships table (internal/store.Friendship).
+// SSOT: friend endpoints contract and the shared error-code table;
+// storage is the physical bidirectional double-row friendships table
+// (internal/store.Friendship).
 //
 // This file holds the pure business logic: no gin imports here. The HTTP
 // adapter lives in http.go.

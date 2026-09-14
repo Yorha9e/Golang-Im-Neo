@@ -2,7 +2,7 @@
 // router) plus the Stage-2 services (friend/media/admin/profile) and the Stage-4
 // group service into one runnable server (MISSIONS M5 + M4, Stage-4 M1/M2/M3).
 //
-// Layer flow (docs/DECOUPLED_ARCHITECTURE_SPEC.md):
+// Layer flow (handshake -> gateway -> router -> logic -> store):
 //
 //	HTTP register/login/ticket -> auth.AuthService + auth.TicketService
 //	WS /ws?ticket=...          -> handshake.Handler (redeem-then-upgrade)
